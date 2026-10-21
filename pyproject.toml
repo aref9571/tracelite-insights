@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tracelite-insights"
+version = "0.1.0.dev0"
+description = "Anomaly detection and related-issue analysis for TraceLite error data"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16",
+    "typer>=0.27",
+    "duckdb>=1.5",
+    "numpy>=2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1",
+    "pytest-cov>=7.1",
+    "ruff>=0.17",
+]
+
+[project.scripts]
+insights = "insights.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "N"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
