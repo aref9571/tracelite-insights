@@ -45,3 +45,26 @@ Settings are read from environment variables with the prefix `INSIGHTS_`, or fro
 | `INSIGHTS_DATABASE_PATH` | `data/insights.duckdb` | Path of the DuckDB database file |
 | `INSIGHTS_API_KEY` | none | Key that protects the Insights REST API |
 | `INSIGHTS_REQUEST_TIMEOUT_SECONDS` | `10` | Timeout for requests to TraceLite, greater than zero |
+
+## Simulated data
+
+The simulator produces realistic, labelled TraceLite error traffic for tests and evaluation. It needs no running TraceLite:
+
+```bash
+insights simulate --seed 1 --days 28 --out data/sim-1/
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--seed` | `1` | Seed for all random choices; the same seed and period give the same files |
+| `--days` | `28` | Length of the simulated period, at least 4 days |
+| `--end` | current hour | End of the period in UTC, for example `2026-10-20T00:00:00`; rounded down to the hour |
+| `--out` | `data/sim-1` | Output folder |
+
+It writes three files:
+
+- `events.jsonl`: one event per line, in the JSON format of TraceLite's `POST /api/v1/events`, sorted by `occurredAt`.
+- `event_failures.jsonl`: the failure type behind each event, by its line index in `events.jsonl`.
+- `truth.json`: the failure families (several failure types with one root cause) and the incidents (time windows with a raised error rate).
+
+Event counts per hour follow a Poisson distribution whose rate has a daily cycle (peak at 14:00 UTC, 40% at night) and a weekly cycle (60% at weekends). Failure and family ids appear only in `event_failures.jsonl` and `truth.json`, never in the events, so the analysis cannot see the answers.
