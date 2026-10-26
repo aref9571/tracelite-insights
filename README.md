@@ -80,3 +80,30 @@ It writes three files:
 - `truth.json`: the failure families (several failure types with one root cause) and the incidents (time windows with a raised error rate).
 
 Event counts per hour follow a Poisson distribution whose rate has a daily cycle (peak at 14:00 UTC, 40% at night) and a weekly cycle (60% at weekends). Failure and family ids appear only in `event_failures.jsonl` and `truth.json`, never in the events, so the analysis cannot see the answers.
+
+## Sending simulated events to TraceLite
+
+With `--send`, the simulator also posts every event to a running TraceLite through `POST /api/v1/events`. Each event is sent with the ingestion key of its application from `INSIGHTS_TRACELITE_INGESTION_KEYS`:
+
+```bash
+insights simulate --seed 1 --days 28 --out data/sim-1/ --send --tracelite-url http://localhost:8080
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--send` | off | Send the events after writing the files |
+| `--tracelite-url` | `INSIGHTS_TRACELITE_BASE_URL` | Base URL of the TraceLite server |
+| `--max-rps` | `50` | Maximum requests per second |
+
+TraceLite accepts `occurredAt` only up to 30 days in the past and 5 minutes in the future, so all events are shifted by the same amount until the newest one lies one minute before the current time. Events that would still be older than 29 days are skipped. The gaps between events, and therefore the daily and weekly cycles and the incidents, stay the same.
+
+The result of every event is written to `sent.jsonl` in the output folder, by its line index in `events.jsonl`:
+
+| Status | When |
+|---|---|
+| `sent` | TraceLite answered `201`; the row holds the returned `issue_id` |
+| `rejected` | TraceLite answered `400` or `413`; the row holds the problem title |
+| `failed` | Any other answer, including `503` after five tries (waiting 0.5, 1, 2 and 4 seconds between them) |
+| `skipped` | The shifted event would be older than 29 days |
+
+Every row also holds the shifted `occurred_at`. A `401` or `403` answer, a missing ingestion key, or a server that cannot be reached after five tries stops the run with an error message; keys are never printed.
