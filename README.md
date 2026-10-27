@@ -1,8 +1,20 @@
 # TraceLite Insights
 
-TraceLite Insights is a companion service for the TraceLite error-monitoring platform. It pulls error data from TraceLite's API into an analytics store, detects abnormal error spikes with statistical models, finds related issues that TraceLite's fingerprinting keeps apart, and measures how well both work against labelled, simulated incidents. A small dashboard and REST API show the results.
+TraceLite Insights is a companion service for the [TraceLite](https://github.com/aref9571/tracelite) error-monitoring platform. Its goal is to pull error data from TraceLite's API into an analytics store, detect abnormal error spikes with statistical models, find related issues that TraceLite's fingerprinting keeps apart, and measure how well both work against labelled, simulated incidents.
 
-**Status:** in development.
+## Status
+
+In development.
+
+| Part | Status |
+|:--|:--|
+| Configuration, domain types and command-line tool | Done |
+| Simulator for labelled TraceLite error traffic with known incidents | Done |
+| Import of issues and events from TraceLite into DuckDB | Planned |
+| Spike detection | Planned |
+| Related-issue analysis | Planned |
+| Evaluation against simulated incidents | Planned |
+| REST API and dashboard | Planned |
 
 ## Requirements
 
