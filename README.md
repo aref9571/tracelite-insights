@@ -10,7 +10,8 @@ In development.
 |:--|:--|
 | Configuration, domain types and command-line tool | Done |
 | Simulator for labelled TraceLite error traffic with known incidents | Done |
-| Import of issues and events from TraceLite into DuckDB | Planned |
+| DuckDB store and offline import of simulated data | Done |
+| Import of issues and events from a running TraceLite | Planned |
 | Spike detection | Planned |
 | Related-issue analysis | Planned |
 | Evaluation against simulated incidents | Planned |
@@ -80,6 +81,26 @@ It writes three files:
 - `truth.json`: the failure families (several failure types with one root cause) and the incidents (time windows with a raised error rate).
 
 Event counts per hour follow a Poisson distribution whose rate has a daily cycle (peak at 14:00 UTC, 40% at night) and a weekly cycle (60% at weekends). Failure and family ids appear only in `event_failures.jsonl` and `truth.json`, never in the events, so the analysis cannot see the answers.
+
+## Loading simulated data into DuckDB
+
+`insights load` imports a simulation folder into the DuckDB database without a running TraceLite:
+
+```bash
+insights load data/sim-1/
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--database` | `INSIGHTS_DATABASE_PATH` | DuckDB database file; created with its folder if it does not exist |
+
+The loader groups events into issues the way TraceLite does: one issue per application, environment and fingerprint, where the fingerprint is a SHA-256 hash of the exception type and the `class.method` names of the stack frames (see TraceLite's ADR 0002). Issue and event ids are UUIDs derived from that content, so loading the same folder again adds nothing. Without TraceLite there is no receive time, so `received_at` is the event's `occurredAt`.
+
+The database has three tables:
+
+- `issues`: one row per issue, with its occurrence count and first and last seen times.
+- `events`: one row per event, linked to its issue by `issue_id`.
+- `sim_event_failures`: the failure type behind each simulated event, used only for evaluation.
 
 ## Sending simulated events to TraceLite
 
