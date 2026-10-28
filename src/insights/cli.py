@@ -7,6 +7,7 @@ import typer
 
 from insights import __version__
 from insights.config import Settings, get_settings
+from insights.loader import load_simulation
 from insights.simulator.scenarios import MINIMUM_DAYS, default_catalogue
 from insights.simulator.sender import (
     SENT_FILE,
@@ -17,6 +18,7 @@ from insights.simulator.sender import (
 )
 from insights.simulator.traffic import simulate
 from insights.simulator.truth import write_jsonl, write_simulation
+from insights.store import Store
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -62,6 +64,28 @@ def simulate_command(
     if send:
         payloads = [event.payload() for event in events]
         send_to_tracelite(payloads, out, tracelite_url, max_rps)
+
+
+@app.command("load")
+def load_command(
+    sim_dir: Annotated[Path, typer.Argument(help="Folder written by insights simulate.")],
+    database: Annotated[
+        Path | None,
+        typer.Option(help="DuckDB database file. Defaults to INSIGHTS_DATABASE_PATH."),
+    ] = None,
+) -> None:
+    database_path = database or get_settings().database_path
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with Store(database_path) as store:
+        try:
+            report = load_simulation(store, sim_dir, datetime.now(UTC))
+        except (OSError, ValueError) as error:
+            typer.echo(f"Error: cannot load {sim_dir}: {error}", err=True)
+            raise typer.Exit(1) from error
+    typer.echo(
+        f"Loaded {report.events} events ({report.new_events} new) "
+        f"in {report.issues} issues into {database_path}"
+    )
 
 
 def send_to_tracelite(
