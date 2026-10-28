@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from insights import cli
 from insights.cli import app
 from insights.config import Settings, get_settings
+from insights.store import Store
 
 runner = CliRunner()
 
@@ -168,3 +169,63 @@ def test_simulate_with_send_reports_missing_ingestion_keys(tracelite, monkeypatc
 def test_http_client_uses_the_configured_timeout():
     with cli.build_http_client(Settings(request_timeout_seconds=2.5)) as client:
         assert client.timeout == httpx.Timeout(2.5)
+
+
+@pytest.fixture
+def simulated_dir(tmp_path):
+    out_dir = tmp_path / "sim-1"
+    runner.invoke(
+        app, ["simulate", "--days", "4", "--end", "2026-10-20T00:00:00", "--out", str(out_dir)]
+    )
+    return out_dir
+
+
+def count_events(database):
+    with Store(database) as store:
+        return store.connection.execute("SELECT count(*) FROM events").fetchone()[0]
+
+
+def test_load_command_creates_the_database_and_reports_counts(simulated_dir, tmp_path):
+    database = tmp_path / "db" / "insights.duckdb"
+    event_count = len((simulated_dir / "events.jsonl").read_text(encoding="utf-8").splitlines())
+
+    result = runner.invoke(app, ["load", str(simulated_dir), "--database", str(database)])
+
+    assert result.exit_code == 0
+    assert f"Loaded {event_count} events ({event_count} new)" in result.stdout
+    assert count_events(database) == event_count
+
+
+def test_load_command_twice_reports_no_new_events(simulated_dir, tmp_path):
+    database = tmp_path / "insights.duckdb"
+    runner.invoke(app, ["load", str(simulated_dir), "--database", str(database)])
+
+    result = runner.invoke(app, ["load", str(simulated_dir), "--database", str(database)])
+
+    assert result.exit_code == 0
+    assert "(0 new)" in result.stdout
+
+
+def test_load_command_uses_the_configured_database_path(simulated_dir, tmp_path, monkeypatch):
+    database = tmp_path / "configured" / "insights.duckdb"
+    monkeypatch.setenv("INSIGHTS_DATABASE_PATH", str(database))
+    get_settings.cache_clear()
+
+    result = runner.invoke(app, ["load", str(simulated_dir)])
+    get_settings.cache_clear()
+
+    assert result.exit_code == 0
+    assert str(database) in result.stdout
+    assert count_events(database) > 0
+
+
+def test_load_command_reports_a_missing_folder(tmp_path):
+    missing = tmp_path / "missing"
+
+    result = runner.invoke(
+        app, ["load", str(missing), "--database", str(tmp_path / "insights.duckdb")]
+    )
+
+    assert result.exit_code == 1
+    assert f"Error: cannot load {missing}" in result.output
+    assert "events.jsonl" in result.output
