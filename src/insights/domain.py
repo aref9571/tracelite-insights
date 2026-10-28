@@ -1,3 +1,4 @@
+import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -39,6 +40,23 @@ class Event(TraceLiteModel):
     received_at: AwareDatetime
     correlation_id: str | None = None
     context: dict[str, Any] | None = None
+
+
+class DailyEventCount(TraceLiteModel):
+    date: datetime.date
+    count: int
+
+
+class IssueStats(TraceLiteModel):
+    issue_id: UUID
+    occurrence_count: int
+    stored_event_count: int
+    first_seen_at: AwareDatetime
+    last_seen_at: AwareDatetime
+    calculated_at: AwareDatetime
+    events_last_24_hours: int
+    events_last_7_days: int
+    daily_event_counts: list[DailyEventCount]
 
 
 class Page[T](TraceLiteModel):
