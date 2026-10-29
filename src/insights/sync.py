@@ -51,12 +51,12 @@ def has_changed(issue: Issue, stored_last_seen: datetime | None) -> bool:
 
 def read_new_events(events: Iterable[Event], store: Store, issue_id: UUID) -> list[Event]:
     newest_stored = store.newest_received_at(issue_id)
-    new_events: dict[UUID, Event] = {}
+    new_events = []
     for event in events:
         if is_known(event, newest_stored, store):
             break
-        new_events.setdefault(event.id, event)
-    return list(new_events.values())
+        new_events.append(event)
+    return new_events
 
 
 def is_known(event: Event, newest_stored: datetime | None, store: Store) -> bool:
