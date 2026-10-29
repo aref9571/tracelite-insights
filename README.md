@@ -11,7 +11,7 @@ In development.
 | Configuration, domain types and command-line tool | Done |
 | Simulator for labelled TraceLite error traffic with known incidents | Done |
 | DuckDB store and offline import of simulated data | Done |
-| Import of issues and events from a running TraceLite | Planned |
+| Import of issues and events from a running TraceLite | Done |
 | Spike detection | Planned |
 | Related-issue analysis | Planned |
 | Evaluation against simulated incidents | Planned |
@@ -128,3 +128,13 @@ The result of every event is written to `sent.jsonl` in the output folder, by it
 | `skipped` | The shifted event would be older than 29 days |
 
 Every row also holds the shifted `occurred_at`. A `401` or `403` answer, a missing ingestion key, or a server that cannot be reached after five tries stops the run with an error message; keys are never printed.
+
+## Syncing from a running TraceLite
+
+`insights sync` reads issues and events from TraceLite's management API into the same DuckDB tables. It needs `INSIGHTS_TRACELITE_MANAGEMENT_KEY`:
+
+```bash
+insights sync
+```
+
+Each run reads only issues that changed since the last run, and only their new events. [docs/development.md](docs/development.md) explains how to run TraceLite locally, send simulated events to it and sync them.
