@@ -229,3 +229,114 @@ def test_load_command_reports_a_missing_folder(tmp_path):
     assert result.exit_code == 1
     assert f"Error: cannot load {missing}" in result.output
     assert "events.jsonl" in result.output
+
+
+SYNC_ISSUE_ID = "00000000-0000-4000-8000-000000000001"
+MANAGEMENT_KEY = "management_key_0123456789abcdef01234567"
+
+
+def sync_issue_json():
+    return {
+        "id": SYNC_ISSUE_ID,
+        "application": "checkout-service",
+        "environment": "production",
+        "fingerprint": "f" * 64,
+        "exceptionType": "java.lang.IllegalStateException",
+        "message": "Cart is empty",
+        "status": "UNRESOLVED",
+        "occurrenceCount": 2,
+        "firstSeenAt": "2026-10-13T09:00:00Z",
+        "lastSeenAt": "2026-10-13T10:00:00Z",
+        "resolvedAt": None,
+    }
+
+
+def sync_event_json(number):
+    return {
+        "id": f"0d9c8b7a-6f5e-4d3c-8b2a-{number:012d}",
+        "exceptionType": "java.lang.IllegalStateException",
+        "message": "Cart is empty",
+        "stackTrace": "java.lang.IllegalStateException: Cart is empty",
+        "occurredAt": f"2026-10-13T{8 + number:02d}:59:58Z",
+        "receivedAt": f"2026-10-13T{9 + number:02d}:00:00Z",
+        "correlationId": None,
+        "context": None,
+    }
+
+
+def page_json(items):
+    return {"items": items, "page": 0, "size": 100, "totalItems": len(items), "totalPages": 1}
+
+
+@pytest.fixture
+def management_api(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("INSIGHTS_TRACELITE_MANAGEMENT_KEY", MANAGEMENT_KEY)
+    get_settings.cache_clear()
+    requests = []
+    responses = {"status": 200}
+
+    def handler(request):
+        requests.append(request)
+        if responses["status"] != 200:
+            return httpx.Response(responses["status"], json={"title": "Unauthorized"})
+        if request.url.path.endswith("/events"):
+            return httpx.Response(200, json=page_json([sync_event_json(1), sync_event_json(0)]))
+        return httpx.Response(200, json=page_json([sync_issue_json()]))
+
+    monkeypatch.setattr(
+        cli,
+        "build_http_client",
+        lambda settings: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    yield requests, responses
+    get_settings.cache_clear()
+
+
+def test_sync_command_stores_issues_and_events_and_reports_counts(management_api, tmp_path):
+    requests, _ = management_api
+    database = tmp_path / "db" / "insights.duckdb"
+
+    result = runner.invoke(
+        app, ["sync", "--database", str(database), "--tracelite-url", "http://tracelite:8080"]
+    )
+
+    assert result.exit_code == 0
+    assert "Synced 1 issues (1 read) and 2 new events from http://tracelite:8080" in result.stdout
+    assert count_events(database) == 2
+    assert {request.url.host for request in requests} == {"tracelite"}
+    assert all(request.headers["X-API-Key"] == MANAGEMENT_KEY for request in requests)
+    assert MANAGEMENT_KEY not in result.output
+
+
+def test_sync_command_twice_reports_no_new_events(management_api, tmp_path):
+    database = tmp_path / "insights.duckdb"
+    runner.invoke(app, ["sync", "--database", str(database)])
+
+    result = runner.invoke(app, ["sync", "--database", str(database)])
+
+    assert result.exit_code == 0
+    assert "Synced 1 issues (0 read) and 0 new events" in result.stdout
+
+
+def test_sync_command_reports_a_refused_key(management_api, tmp_path):
+    _, responses = management_api
+    responses["status"] = 401
+
+    result = runner.invoke(app, ["sync", "--database", str(tmp_path / "insights.duckdb")])
+
+    assert result.exit_code == 1
+    assert "Error: sync from http://localhost:8080 failed: 401 Unauthorized" in result.output
+    assert MANAGEMENT_KEY not in result.output
+
+
+def test_sync_command_needs_a_management_key(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("INSIGHTS_TRACELITE_MANAGEMENT_KEY", raising=False)
+    get_settings.cache_clear()
+
+    result = runner.invoke(app, ["sync", "--database", str(tmp_path / "insights.duckdb")])
+    get_settings.cache_clear()
+
+    assert result.exit_code == 1
+    assert "INSIGHTS_TRACELITE_MANAGEMENT_KEY is not set" in result.output

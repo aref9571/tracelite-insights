@@ -248,3 +248,24 @@ def test_insert_event_failures_stores_each_event_once(store):
     assert fetch_all(store, "SELECT * FROM sim_event_failures") == [
         (event_id, "checkout-db-timeout")
     ]
+
+
+def test_has_event_tells_stored_events_from_unknown_ones(store):
+    event = make_event(uuid4())
+    store.insert_events([event])
+
+    assert store.has_event(event.id) is True
+    assert store.has_event(uuid4()) is False
+
+
+def test_last_seen_by_issue_maps_every_stored_issue_to_its_last_seen_time(store):
+    later = FIRST_SEEN + timedelta(days=1)
+    first = make_issue()
+    second = make_issue(last_seen_at=later)
+    store.upsert_issues([first, second], SYNCED_AT)
+
+    assert store.last_seen_by_issue() == {first.id: FIRST_SEEN, second.id: later}
+
+
+def test_last_seen_by_issue_is_empty_without_issues(store):
+    assert store.last_seen_by_issue() == {}
