@@ -128,6 +128,14 @@ class Store:
         ).fetchone()
         return row[0] if row else None
 
+    def has_event(self, event_id: UUID) -> bool:
+        row = self.connection.execute("SELECT 1 FROM events WHERE id = ?", [event_id]).fetchone()
+        return row is not None
+
+    def last_seen_by_issue(self) -> dict[UUID, datetime]:
+        rows = self.connection.execute("SELECT id, last_seen_at FROM issues").fetchall()
+        return dict(rows)
+
     def insert_rows(
         self,
         table: str,

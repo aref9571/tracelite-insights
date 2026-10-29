@@ -19,6 +19,8 @@ from insights.simulator.sender import (
 from insights.simulator.traffic import simulate
 from insights.simulator.truth import write_jsonl, write_simulation
 from insights.store import Store
+from insights.sync import sync
+from insights.tracelite_client import TraceLiteClient, TraceLiteConnectionError, TraceLiteError
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -85,6 +87,38 @@ def load_command(
     typer.echo(
         f"Loaded {report.events} events ({report.new_events} new) "
         f"in {report.issues} issues into {database_path}"
+    )
+
+
+@app.command("sync")
+def sync_command(
+    database: Annotated[
+        Path | None,
+        typer.Option(help="DuckDB database file. Defaults to INSIGHTS_DATABASE_PATH."),
+    ] = None,
+    tracelite_url: Annotated[
+        str | None,
+        typer.Option(help="TraceLite base URL. Defaults to INSIGHTS_TRACELITE_BASE_URL."),
+    ] = None,
+) -> None:
+    settings = get_settings()
+    if settings.tracelite_management_key is None:
+        typer.echo("Error: INSIGHTS_TRACELITE_MANAGEMENT_KEY is not set", err=True)
+        raise typer.Exit(1)
+    base_url = tracelite_url or settings.tracelite_base_url
+    database_path = database or settings.database_path
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with build_http_client(settings) as http_client, Store(database_path) as store:
+        client = TraceLiteClient(base_url, settings.tracelite_management_key, http_client)
+        try:
+            report = sync(client, store, datetime.now(UTC))
+        except (TraceLiteError, TraceLiteConnectionError) as error:
+            typer.echo(f"Error: sync from {base_url} failed: {error}", err=True)
+            raise typer.Exit(1) from error
+    typer.echo(
+        f"Synced {report.issues_seen} issues ({report.issues_read} read) and "
+        f"{report.new_events} new events from {base_url} into {database_path} "
+        f"in {report.duration_seconds:.1f} s"
     )
 
 
