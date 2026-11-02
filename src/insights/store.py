@@ -7,7 +7,7 @@ from uuid import UUID
 
 import duckdb
 
-from insights.domain import Event, Issue
+from insights.domain import Anomaly, Event, Issue
 
 ROWS_PER_INSERT = 500
 
@@ -46,10 +46,21 @@ CREATE_SIM_EVENT_FAILURES_TABLE = (
     "failure_id VARCHAR NOT NULL)"
 )
 
+CREATE_ANOMALIES_TABLE = (
+    "CREATE TABLE IF NOT EXISTS anomalies ("
+    "detector VARCHAR NOT NULL, "
+    "series_key VARCHAR[] NOT NULL, "
+    "hour TIMESTAMPTZ NOT NULL, "
+    "count BIGINT NOT NULL, "
+    "expected DOUBLE NOT NULL, "
+    "score DOUBLE NOT NULL)"
+)
+
 SCHEMA_STATEMENTS = (
     CREATE_ISSUES_TABLE,
     CREATE_EVENTS_TABLE,
     CREATE_SIM_EVENT_FAILURES_TABLE,
+    CREATE_ANOMALIES_TABLE,
     "CREATE INDEX IF NOT EXISTS events_issue_id_idx ON events (issue_id)",
     "CREATE INDEX IF NOT EXISTS events_occurred_at_idx ON events (occurred_at)",
 )
@@ -82,6 +93,8 @@ EVENT_COLUMNS = (
 )
 
 SIM_EVENT_FAILURE_COLUMNS = ("event_id", "failure_id")
+
+ANOMALY_COLUMNS = ("detector", "series_key", "hour", "count", "expected", "score")
 
 ISSUE_UPSERT_ACTION = "ON CONFLICT (id) DO UPDATE SET " + ", ".join(
     f"{column} = excluded.{column}" for column in ISSUE_COLUMNS if column != "id"
@@ -122,6 +135,19 @@ class Store:
             "sim_event_failures", SIM_EVENT_FAILURE_COLUMNS, rows, "ON CONFLICT DO NOTHING"
         )
 
+    def replace_anomalies(self, detector: str, anomalies: Sequence[Anomaly]) -> int:
+        check_anomalies(detector, anomalies)
+        rows = [anomaly_row(anomaly) for anomaly in anomalies]
+        self.connection.begin()
+        try:
+            self.connection.execute("DELETE FROM anomalies WHERE detector = ?", [detector])
+            written = self.write_rows("anomalies", ANOMALY_COLUMNS, rows, "")
+        except Exception:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+        return written
+
     def newest_received_at(self, issue_id: UUID) -> datetime | None:
         row = self.connection.execute(
             "SELECT max(received_at) FROM events WHERE issue_id = ?", [issue_id]
@@ -143,18 +169,28 @@ class Store:
         rows: Sequence[Sequence[Any]],
         conflict_action: str,
     ) -> int:
-        written = 0
         self.connection.begin()
         try:
-            for start in range(0, len(rows), ROWS_PER_INSERT):
-                chunk = rows[start : start + ROWS_PER_INSERT]
-                sql = insert_statement(table, columns, len(chunk), conflict_action)
-                parameters = [value for row in chunk for value in row]
-                written += self.connection.execute(sql, parameters).fetchone()[0]
+            written = self.write_rows(table, columns, rows, conflict_action)
         except Exception:
             self.connection.rollback()
             raise
         self.connection.commit()
+        return written
+
+    def write_rows(
+        self,
+        table: str,
+        columns: Sequence[str],
+        rows: Sequence[Sequence[Any]],
+        conflict_action: str,
+    ) -> int:
+        written = 0
+        for start in range(0, len(rows), ROWS_PER_INSERT):
+            chunk = rows[start : start + ROWS_PER_INSERT]
+            sql = insert_statement(table, columns, len(chunk), conflict_action)
+            parameters = [value for row in chunk for value in row]
+            written += self.connection.execute(sql, parameters).fetchone()[0]
         return written
 
 
@@ -196,4 +232,24 @@ def event_row(event: Event) -> tuple[Any, ...]:
         event.received_at,
         event.correlation_id,
         None if event.context is None else json.dumps(event.context),
+    )
+
+
+def check_anomalies(detector: str, anomalies: Sequence[Anomaly]) -> None:
+    other_detectors = {anomaly.detector for anomaly in anomalies} - {detector}
+    if other_detectors:
+        raise ValueError(f"Expected only {detector!r} anomalies, got {sorted(other_detectors)}")
+    keys = [(anomaly.series_key, anomaly.hour) for anomaly in anomalies]
+    if len(set(keys)) != len(keys):
+        raise ValueError("An anomaly appears twice for the same series and hour")
+
+
+def anomaly_row(anomaly: Anomaly) -> tuple[Any, ...]:
+    return (
+        anomaly.detector,
+        list(anomaly.series_key),
+        anomaly.hour,
+        anomaly.count,
+        anomaly.expected,
+        anomaly.score,
     )

@@ -6,7 +6,7 @@ import duckdb
 import pytest
 
 from insights import store as store_module
-from insights.domain import Event, Issue, IssueStatus
+from insights.domain import Anomaly, Event, Issue, IssueStatus
 from insights.store import ROWS_PER_INSERT, Store
 
 FIRST_SEEN = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
@@ -44,6 +44,18 @@ def make_event(issue_id, **changes):
     return Event(**(values | changes))
 
 
+def make_anomaly(**changes):
+    values = {
+        "detector": "zscore",
+        "series_key": ("checkout-service", "production"),
+        "hour": FIRST_SEEN,
+        "count": 40,
+        "expected": 5.5,
+        "score": 12.25,
+    }
+    return Anomaly(**(values | changes))
+
+
 @pytest.fixture
 def store(tmp_path):
     with Store(tmp_path / "insights.duckdb") as opened:
@@ -63,7 +75,7 @@ def test_create_schema_creates_tables_and_indexes(store):
     tables = fetch_all(store, "SELECT table_name FROM duckdb_tables() ORDER BY table_name")
     indexes = fetch_all(store, "SELECT index_name FROM duckdb_indexes() ORDER BY index_name")
 
-    assert tables == [("events",), ("issues",), ("sim_event_failures",)]
+    assert tables == [("anomalies",), ("events",), ("issues",), ("sim_event_failures",)]
     assert indexes == [("events_issue_id_idx",), ("events_occurred_at_idx",)]
 
 
@@ -269,3 +281,77 @@ def test_last_seen_by_issue_maps_every_stored_issue_to_its_last_seen_time(store)
 
 def test_last_seen_by_issue_is_empty_without_issues(store):
     assert store.last_seen_by_issue() == {}
+
+
+def stored_anomalies(store):
+    return fetch_all(
+        store,
+        "SELECT detector, series_key, hour, count, expected, score FROM anomalies "
+        "ORDER BY detector, hour",
+    )
+
+
+def test_replace_anomalies_stores_every_column(store):
+    written = store.replace_anomalies("zscore", [make_anomaly()])
+
+    assert written == 1
+    assert stored_anomalies(store) == [
+        ("zscore", ["checkout-service", "production"], FIRST_SEEN, 40, 5.5, 12.25)
+    ]
+
+
+def test_replace_anomalies_removes_earlier_rows_of_the_same_detector(store):
+    later = FIRST_SEEN + timedelta(hours=1)
+    store.replace_anomalies("zscore", [make_anomaly(), make_anomaly(hour=later)])
+
+    written = store.replace_anomalies("zscore", [make_anomaly(hour=later, count=41)])
+
+    assert written == 1
+    assert [(row[2], row[3]) for row in stored_anomalies(store)] == [(later, 41)]
+
+
+def test_replace_anomalies_keeps_rows_of_other_detectors(store):
+    store.replace_anomalies("seasonal", [make_anomaly(detector="seasonal")])
+
+    store.replace_anomalies("zscore", [make_anomaly()])
+    store.replace_anomalies("zscore", [])
+
+    assert [row[0] for row in stored_anomalies(store)] == ["seasonal"]
+
+
+def test_replace_anomalies_rejects_rows_of_another_detector(store):
+    with pytest.raises(ValueError, match="seasonal"):
+        store.replace_anomalies("zscore", [make_anomaly(detector="seasonal")])
+
+
+def test_replace_anomalies_rejects_the_same_series_and_hour_twice(store):
+    with pytest.raises(ValueError, match="twice"):
+        store.replace_anomalies("zscore", [make_anomaly(), make_anomaly(score=9.0)])
+
+
+def test_same_hour_in_different_series_is_allowed(store):
+    other_series = make_anomaly(series_key=("checkout-service", "staging"))
+
+    assert store.replace_anomalies("zscore", [make_anomaly(), other_series]) == 2
+
+
+def test_failed_replace_keeps_the_earlier_anomalies(store, monkeypatch):
+    monkeypatch.setattr(store_module, "ROWS_PER_INSERT", 1)
+    store.replace_anomalies("zscore", [make_anomaly()])
+    later = FIRST_SEEN + timedelta(hours=1)
+    broken = make_anomaly(hour=later + timedelta(hours=1)).model_copy(update={"count": None})
+
+    with pytest.raises(duckdb.Error):
+        store.replace_anomalies("zscore", [make_anomaly(hour=later), broken])
+
+    assert [row[2] for row in stored_anomalies(store)] == [FIRST_SEEN]
+
+
+def test_replace_anomalies_handles_more_rows_than_one_statement(store):
+    anomalies = [
+        make_anomaly(hour=FIRST_SEEN + timedelta(hours=index))
+        for index in range(ROWS_PER_INSERT + 1)
+    ]
+
+    assert store.replace_anomalies("zscore", anomalies) == ROWS_PER_INSERT + 1
+    assert count_rows(store, "anomalies") == ROWS_PER_INSERT + 1
