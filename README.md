@@ -12,7 +12,7 @@ In development.
 | Simulator for labelled TraceLite error traffic with known incidents | Done |
 | DuckDB store and offline import of simulated data | Done |
 | Import of issues and events from a running TraceLite | Done |
-| Spike detection | Planned |
+| Spike detection | In progress |
 | Related-issue analysis | Planned |
 | Evaluation against simulated incidents | Planned |
 | REST API and dashboard | Planned |
@@ -101,6 +101,7 @@ The database has three tables:
 - `issues`: one row per issue, with its occurrence count and first and last seen times.
 - `events`: one row per event, linked to its issue by `issue_id`.
 - `sim_event_failures`: the failure type behind each simulated event, used only for evaluation.
+- `anomalies`: the hours flagged by `insights detect`.
 
 ## Sending simulated events to TraceLite
 
@@ -138,3 +139,21 @@ insights sync
 ```
 
 Each run reads only issues that changed since the last run, and only their new events. [docs/development.md](docs/development.md) explains how to run TraceLite locally, send simulated events to it and sync them.
+
+## Detecting error spikes
+
+`insights detect` builds one series of hourly error counts per application and environment, over all hours from the first to the last stored event, and stores every hour it flags as an anomaly:
+
+```bash
+insights detect --detector zscore --threshold 4
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--detector` | `zscore` | Detector to run |
+| `--threshold` | `4` | Score at or above which an hour is flagged |
+| `--database` | `INSIGHTS_DATABASE_PATH` | DuckDB database file; it must already exist |
+
+Each run replaces the earlier anomalies of the same detector. Rows of other detectors are kept.
+
+The `zscore` detector compares each hour with the 168 hours (one week) before it. The score is `(count - mean) / max(std, 1)`, where the mean and standard deviation come from those previous hours only, so a spike does not raise its own baseline. The floor of 1 keeps quiet series with an almost constant count from producing huge scores. An hour is flagged only if its score reaches the threshold and it has at least 3 errors. The first 168 hours of a series have no score.
