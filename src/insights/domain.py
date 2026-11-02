@@ -65,3 +65,14 @@ class Page[T](TraceLiteModel):
     size: int
     total_items: int
     total_pages: int
+
+
+class Anomaly(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    detector: str
+    series_key: tuple[str, ...]
+    hour: AwareDatetime
+    count: int
+    expected: float
+    score: float
