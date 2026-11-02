@@ -1,4 +1,6 @@
 import json
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -7,6 +9,7 @@ from typer.testing import CliRunner
 from insights import cli
 from insights.cli import app
 from insights.config import Settings, get_settings
+from insights.domain import Event, Issue, IssueStatus
 from insights.store import Store
 
 runner = CliRunner()
@@ -340,3 +343,107 @@ def test_sync_command_needs_a_management_key(monkeypatch, tmp_path):
 
     assert result.exit_code == 1
     assert "INSIGHTS_TRACELITE_MANAGEMENT_KEY is not set" in result.output
+
+
+DETECT_START = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
+SPIKE_HOUR = 170
+
+
+def create_database_with_spike(database):
+    issue = Issue(
+        id=uuid4(),
+        application="checkout-service",
+        environment="production",
+        fingerprint="f" * 64,
+        exception_type="java.lang.IllegalStateException",
+        status=IssueStatus.UNRESOLVED,
+        occurrence_count=1,
+        first_seen_at=DETECT_START,
+        last_seen_at=DETECT_START,
+    )
+    events_per_hour = [3] * 180
+    events_per_hour[SPIKE_HOUR] = 30
+    events = [
+        Event(
+            id=uuid4(),
+            issue_id=issue.id,
+            exception_type=issue.exception_type,
+            occurred_at=DETECT_START + timedelta(hours=hour, minutes=minute),
+            received_at=DETECT_START + timedelta(hours=hour, minutes=minute),
+        )
+        for hour, count in enumerate(events_per_hour)
+        for minute in range(count)
+    ]
+    with Store(database) as store:
+        store.create_schema()
+        store.upsert_issues([issue], DETECT_START)
+        store.insert_events(events)
+
+
+def stored_anomaly_hours(database):
+    with Store(database) as store:
+        rows = store.connection.execute(
+            "SELECT detector, series_key, hour FROM anomalies ORDER BY hour"
+        ).fetchall()
+    return rows
+
+
+def test_detect_command_stores_the_spike_and_reports_counts(tmp_path):
+    database = tmp_path / "insights.duckdb"
+    create_database_with_spike(database)
+
+    result = runner.invoke(
+        app, ["detect", "--detector", "zscore", "--threshold", "4", "--database", str(database)]
+    )
+
+    assert result.exit_code == 0
+    assert "Stored 1 zscore anomalies at threshold 4 from 1 series of 180 hours" in result.stdout
+    assert stored_anomaly_hours(database) == [
+        (
+            "zscore",
+            ["checkout-service", "production"],
+            DETECT_START + timedelta(hours=SPIKE_HOUR),
+        )
+    ]
+
+
+def test_detect_command_twice_replaces_the_earlier_anomalies(tmp_path):
+    database = tmp_path / "insights.duckdb"
+    create_database_with_spike(database)
+    runner.invoke(app, ["detect", "--threshold", "4", "--database", str(database)])
+
+    result = runner.invoke(app, ["detect", "--threshold", "100", "--database", str(database)])
+
+    assert result.exit_code == 0
+    assert "Stored 0 zscore anomalies at threshold 100" in result.stdout
+    assert stored_anomaly_hours(database) == []
+
+
+def test_detect_command_reports_an_empty_database(tmp_path):
+    database = tmp_path / "insights.duckdb"
+    with Store(database) as store:
+        store.create_schema()
+
+    result = runner.invoke(app, ["detect", "--database", str(database)])
+
+    assert result.exit_code == 0
+    assert "No events" in result.stdout
+
+
+def test_detect_command_reports_a_missing_database(tmp_path):
+    database = tmp_path / "missing.duckdb"
+
+    result = runner.invoke(app, ["detect", "--database", str(database)])
+
+    assert result.exit_code == 1
+    assert f"Error: database {database} does not exist" in result.output
+    assert not database.exists()
+
+
+def test_detect_command_refuses_an_unknown_detector(tmp_path):
+    result = runner.invoke(
+        app, ["detect", "--detector", "magic", "--database", str(tmp_path / "x.duckdb")]
+    )
+
+    assert result.exit_code == 1
+    assert "unknown detector 'magic'; choose one of: zscore" in result.output

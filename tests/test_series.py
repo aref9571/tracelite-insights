@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from insights.domain import Event, Issue, IssueStatus
-from insights.series import Series, hourly_counts
+from insights.series import Series, event_period, hourly_counts
 from insights.store import Store
 
 START = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
@@ -244,3 +244,41 @@ def test_invalid_period_is_refused(store, start, end, message):
 def test_invalid_key_columns_are_refused(store, by, message):
     with pytest.raises(ValueError, match=message):
         hourly_counts(store, START, END, by=by)
+
+
+def test_event_period_covers_the_hours_of_the_first_and_last_event(store):
+    issue = add_issue(store)
+    add_events(store, issue, at(3, 59), at(1, 15), at(2))
+
+    assert event_period(store) == (at(1), at(4))
+
+
+def test_event_period_of_a_single_event_is_its_hour(store):
+    add_events(store, add_issue(store), at(2, 30))
+
+    assert event_period(store) == (at(2), at(3))
+
+
+def test_event_period_is_in_utc(store):
+    plus_two = timezone(timedelta(hours=2))
+    add_events(store, add_issue(store), datetime(2026, 10, 1, 3, 30, tzinfo=plus_two))
+
+    first, last = event_period(store)
+
+    assert (first, last) == (at(1), at(2))
+    assert first.utcoffset() == timedelta(0)
+
+
+def test_event_period_without_events_is_none(store):
+    add_issue(store)
+
+    assert event_period(store) is None
+
+
+def test_event_period_can_be_passed_to_hourly_counts(store):
+    issue = add_issue(store)
+    add_events(store, issue, at(1, 15), at(3, 59))
+
+    series = only_series(hourly_counts(store, *event_period(store)))
+
+    assert series.counts.tolist() == [1, 0, 1]

@@ -7,7 +7,10 @@ import typer
 
 from insights import __version__
 from insights.config import Settings, get_settings
+from insights.detection.base import Detector, find_anomalies
+from insights.detection.zscore import RollingZScore
 from insights.loader import load_simulation
+from insights.series import event_period, hourly_counts
 from insights.simulator.scenarios import MINIMUM_DAYS, default_catalogue
 from insights.simulator.sender import (
     SENT_FILE,
@@ -23,6 +26,8 @@ from insights.sync import sync
 from insights.tracelite_client import TraceLiteClient, TraceLiteConnectionError, TraceLiteError
 
 app = typer.Typer(no_args_is_help=True)
+
+DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore}
 
 
 @app.callback()
@@ -119,6 +124,46 @@ def sync_command(
         f"Synced {report.issues_seen} issues ({report.issues_read} read) and "
         f"{report.new_events} new events from {base_url} into {database_path} "
         f"in {report.duration_seconds:.1f} s"
+    )
+
+
+@app.command("detect")
+def detect_command(
+    detector: Annotated[
+        str, typer.Option(help=f"Detector to run: {', '.join(DETECTORS)}.")
+    ] = "zscore",
+    threshold: Annotated[
+        float, typer.Option(help="Score at or above which an hour is an anomaly.")
+    ] = 4.0,
+    database: Annotated[
+        Path | None,
+        typer.Option(help="DuckDB database file. Defaults to INSIGHTS_DATABASE_PATH."),
+    ] = None,
+) -> None:
+    if detector not in DETECTORS:
+        typer.echo(
+            f"Error: unknown detector {detector!r}; choose one of: {', '.join(DETECTORS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    database_path = database or get_settings().database_path
+    if not database_path.exists():
+        typer.echo(f"Error: database {database_path} does not exist", err=True)
+        raise typer.Exit(1)
+    with Store(database_path) as store:
+        store.create_schema()
+        period = event_period(store)
+        if period is None:
+            typer.echo(f"No events in {database_path}; nothing to detect")
+            return
+        start, end = period
+        series_list = hourly_counts(store, start, end)
+        anomalies = find_anomalies(DETECTORS[detector](), series_list, threshold)
+        written = store.replace_anomalies(detector, anomalies)
+    hours = (end - start) // timedelta(hours=1)
+    typer.echo(
+        f"Stored {written} {detector} anomalies at threshold {threshold:g} "
+        f"from {len(series_list)} series of {hours} hours in {database_path}"
     )
 
 

@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -30,6 +30,16 @@ def hourly_counts(
     check_period(start, end)
     rows = store.connection.execute(hourly_counts_query(by), [start, end, start, end]).fetchall()
     return series_from_rows(rows, len(by))
+
+
+def event_period(store: Store) -> tuple[datetime, datetime] | None:
+    first, last = store.connection.execute(
+        "SELECT date_trunc('hour', min(occurred_at)), date_trunc('hour', max(occurred_at)) "
+        "FROM events"
+    ).fetchone()
+    if first is None:
+        return None
+    return first, last + timedelta(hours=1)
 
 
 def check_key_columns(by: Sequence[str]) -> None:
