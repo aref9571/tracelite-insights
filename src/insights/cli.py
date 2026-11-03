@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Annotated
 
 import httpx
@@ -9,6 +10,8 @@ from insights import __version__
 from insights.config import Settings, get_settings
 from insights.detection.base import Detector, find_anomalies
 from insights.detection.zscore import RollingZScore
+from insights.evaluation.incidents import Evaluation, evaluate_detector, read_truth
+from insights.evaluation.report import markdown_table, report_row
 from insights.loader import load_simulation
 from insights.series import event_period, hourly_counts
 from insights.simulator.scenarios import MINIMUM_DAYS, default_catalogue
@@ -20,7 +23,7 @@ from insights.simulator.sender import (
     send_events,
 )
 from insights.simulator.traffic import simulate
-from insights.simulator.truth import write_jsonl, write_simulation
+from insights.simulator.truth import TRUTH_FILE, write_jsonl, write_simulation
 from insights.store import Store
 from insights.sync import sync
 from insights.tracelite_client import TraceLiteClient, TraceLiteConnectionError, TraceLiteError
@@ -28,6 +31,7 @@ from insights.tracelite_client import TraceLiteClient, TraceLiteConnectionError,
 app = typer.Typer(no_args_is_help=True)
 
 DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore}
+EVALUATION_END = datetime(2026, 10, 20)
 
 
 @app.callback()
@@ -140,12 +144,7 @@ def detect_command(
         typer.Option(help="DuckDB database file. Defaults to INSIGHTS_DATABASE_PATH."),
     ] = None,
 ) -> None:
-    if detector not in DETECTORS:
-        typer.echo(
-            f"Error: unknown detector {detector!r}; choose one of: {', '.join(DETECTORS)}",
-            err=True,
-        )
-        raise typer.Exit(1)
+    check_detector(detector)
     database_path = database or get_settings().database_path
     if not database_path.exists():
         typer.echo(f"Error: database {database_path} does not exist", err=True)
@@ -164,6 +163,85 @@ def detect_command(
     typer.echo(
         f"Stored {written} {detector} anomalies at threshold {threshold:g} "
         f"from {len(series_list)} series of {hours} hours in {database_path}"
+    )
+
+
+@app.command("evaluate")
+def evaluate_command(
+    seeds: Annotated[
+        str, typer.Option(help="Comma-separated simulation seeds to evaluate on.")
+    ] = "2,3,4,5",
+    detector: Annotated[
+        str, typer.Option(help=f"Detector to evaluate: {', '.join(DETECTORS)}.")
+    ] = "zscore",
+    threshold: Annotated[
+        float, typer.Option(help="Score at or above which an hour is an anomaly.")
+    ] = 4.0,
+    days: Annotated[
+        int, typer.Option(min=MINIMUM_DAYS, help="Length of each simulated period in days.")
+    ] = 28,
+    end: Annotated[
+        datetime, typer.Option(help="End of each simulated period in UTC.")
+    ] = EVALUATION_END,
+) -> None:
+    check_detector(detector)
+    try:
+        seed_list = parse_seeds(seeds)
+    except ValueError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1) from error
+    end_hour = start_of_hour(end.replace(tzinfo=UTC))
+    evaluations = []
+    for seed in seed_list:
+        evaluation = evaluate_seed(seed, days, end_hour, DETECTORS[detector](), threshold)
+        typer.echo(seed_summary(seed, evaluation))
+        evaluations.append(evaluation)
+    typer.echo("")
+    typer.echo(markdown_table([report_row(detector, threshold, evaluations)]), nl=False)
+
+
+def check_detector(name: str) -> None:
+    if name not in DETECTORS:
+        typer.echo(
+            f"Error: unknown detector {name!r}; choose one of: {', '.join(DETECTORS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+def parse_seeds(text: str) -> list[int]:
+    parts = [part.strip() for part in text.split(",")]
+    if not all(part.isdigit() for part in parts):
+        raise ValueError(f"seeds must be comma-separated whole numbers, got {text!r}")
+    seeds = [int(part) for part in parts]
+    if len(set(seeds)) != len(seeds):
+        raise ValueError(f"seeds contain a seed twice: {text!r}")
+    return seeds
+
+
+def evaluate_seed(
+    seed: int, days: int, end: datetime, detector: Detector, threshold: float
+) -> Evaluation:
+    start = end - timedelta(days=days)
+    catalogue = default_catalogue(seed, start, end)
+    events = simulate(catalogue, start, end, seed)
+    with TemporaryDirectory() as work_dir:
+        sim_dir = Path(work_dir) / "sim"
+        write_simulation(sim_dir, catalogue, events, seed, start, end)
+        truth = read_truth(sim_dir / TRUTH_FILE)
+        with Store(Path(work_dir) / "insights.duckdb") as store:
+            load_simulation(store, sim_dir, datetime.now(UTC))
+            series_list = hourly_counts(store, truth.start, truth.end)
+    return evaluate_detector(detector, series_list, truth, threshold)
+
+
+def seed_summary(seed: int, evaluation: Evaluation) -> str:
+    hours = evaluation.hours
+    incidents = evaluation.incidents
+    return (
+        f"Seed {seed}: precision {hours.precision:.2f}, recall {hours.recall:.2f}, "
+        f"F1 {hours.f1:.2f}, {incidents.detected} of {incidents.incidents} incidents detected, "
+        f"{incidents.false_alerts} false alerts in {incidents.monitored_hours} monitored hours"
     )
 
 

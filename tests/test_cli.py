@@ -447,3 +447,41 @@ def test_detect_command_refuses_an_unknown_detector(tmp_path):
 
     assert result.exit_code == 1
     assert "unknown detector 'magic'; choose one of: zscore" in result.output
+
+
+def test_evaluate_command_prints_one_line_per_seed_and_the_summary_table():
+    result = runner.invoke(app, ["evaluate", "--seeds", "1,2", "--days", "8", "--threshold", "4"])
+
+    assert result.exit_code == 0
+    lines = result.stdout.splitlines()
+    assert lines[0].startswith("Seed 1: precision ")
+    assert lines[1].startswith("Seed 2: precision ")
+    assert "of 10 incidents detected" in lines[0]
+    assert "in 24 monitored hours" in lines[0]
+    assert lines[3].startswith("| Detector | Threshold | Precision | Recall | F1 |")
+    assert lines[5].startswith("| zscore | 4 | ")
+
+
+def test_evaluate_seed_with_the_same_seed_gives_the_same_evaluation():
+    end = datetime(2026, 10, 20, tzinfo=UTC)
+
+    first = cli.evaluate_seed(3, 8, end, cli.RollingZScore(), 4.0)
+    second = cli.evaluate_seed(3, 8, end, cli.RollingZScore(), 4.0)
+
+    assert first == second
+    assert first.incidents.incidents == 10
+
+
+@pytest.mark.parametrize("seeds", ["2,x", "", "2,,3", "-1", "2,3,2"])
+def test_evaluate_command_refuses_invalid_seeds(seeds):
+    result = runner.invoke(app, ["evaluate", "--seeds", seeds, "--days", "4"])
+
+    assert result.exit_code == 1
+    assert "Error: seeds" in result.output
+
+
+def test_evaluate_command_refuses_an_unknown_detector():
+    result = runner.invoke(app, ["evaluate", "--detector", "magic"])
+
+    assert result.exit_code == 1
+    assert "unknown detector 'magic'; choose one of: zscore" in result.output
