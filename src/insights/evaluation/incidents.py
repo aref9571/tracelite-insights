@@ -83,6 +83,12 @@ class Evaluation:
     incidents: IncidentMetrics
 
 
+@dataclass(frozen=True)
+class SweepPoint:
+    threshold: float
+    evaluation: Evaluation
+
+
 def read_truth(path: Path) -> GroundTruth:
     document = json.loads(path.read_text(encoding="utf-8"))
     incidents = tuple(
@@ -178,6 +184,28 @@ def evaluate_detector(
         hours=hour_metrics(concatenate(all_alerts), concatenate(all_labels)),
         incidents=incident_metrics(alert_hours, truth.incidents, monitored_hours),
     )
+
+
+def threshold_sweep(
+    detector: Detector,
+    series_list: Sequence[Series],
+    truth: GroundTruth,
+    thresholds: Sequence[float],
+) -> list[SweepPoint]:
+    return [
+        SweepPoint(threshold, evaluate_detector(detector, series_list, truth, threshold))
+        for threshold in thresholds
+    ]
+
+
+def best_threshold(points: Sequence[SweepPoint]) -> SweepPoint:
+    if not points:
+        raise ValueError("a sweep needs at least one threshold")
+    best = points[0]
+    for point in points[1:]:
+        if point.evaluation.hours.f1 > best.evaluation.hours.f1:
+            best = point
+    return best
 
 
 def concatenate(arrays: list[np.ndarray]) -> np.ndarray:

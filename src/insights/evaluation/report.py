@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from insights.evaluation.incidents import Evaluation
+from insights.evaluation.incidents import Evaluation, SweepPoint
 
 COLUMNS = (
     "Precision",
@@ -14,6 +14,9 @@ COLUMNS = (
     "False alerts/week",
     "Median delay (h)",
 )
+
+
+SWEEP_COLUMNS = COLUMNS[:5]
 
 
 @dataclass(frozen=True)
@@ -74,5 +77,18 @@ def markdown_table(rows: Sequence[ReportRow]) -> str:
     ]
     for row in rows:
         cells = [row.detector, f"{row.threshold:g}", *map(format_summary, row.summaries)]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def sweep_table(points: Sequence[SweepPoint]) -> str:
+    header = ["Threshold", *SWEEP_COLUMNS]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "|" + "--:|" * len(header),
+    ]
+    for point in points:
+        values = metric_values(point.evaluation)[: len(SWEEP_COLUMNS)]
+        cells = [f"{point.threshold:g}", *(f"{value:.2f}" for value in values)]
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"

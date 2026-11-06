@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from insights.evaluation.incidents import Evaluation, HourMetrics, IncidentMetrics
+from insights.evaluation.incidents import Evaluation, HourMetrics, IncidentMetrics, SweepPoint
 from insights.evaluation.report import (
     ReportRow,
     Summary,
@@ -10,6 +10,7 @@ from insights.evaluation.report import (
     metric_values,
     report_row,
     summarise,
+    sweep_table,
 )
 
 
@@ -101,4 +102,20 @@ def test_markdown_table_has_a_header_and_one_line_per_row():
         "|:--|--:|--:|--:|--:|--:|--:|--:|",
         "| zscore | 4 | 0.50 ± 0.25 | 0.12 ± 0.00 | 0.20 ± 0.05 | 0.30 ± 0.10 "
         "| 1.50 ± 0.50 | n/a |",
+    ]
+
+
+def test_sweep_table_has_one_line_per_threshold_without_delay():
+    points = [
+        SweepPoint(2.0, make_evaluation(2, 1, 1, detected=2, delays=[0.0])),
+        SweepPoint(2.5, make_evaluation(0, 0, 3, detected=0, delays=[])),
+    ]
+
+    table = sweep_table(points)
+
+    assert table.splitlines() == [
+        "| Threshold | Precision | Recall | F1 | Incident recall | False alerts/week |",
+        "|--:|--:|--:|--:|--:|--:|",
+        "| 2 | 0.67 | 0.67 | 0.67 | 0.50 | 1.00 |",
+        "| 2.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |",
     ]

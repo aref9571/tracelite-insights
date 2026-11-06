@@ -11,10 +11,17 @@ from insights.config import Settings, get_settings
 from insights.detection.base import Detector, find_anomalies
 from insights.detection.seasonal import SeasonalRobust
 from insights.detection.zscore import RollingZScore
-from insights.evaluation.incidents import Evaluation, evaluate_detector, read_truth
-from insights.evaluation.report import markdown_table, report_row
+from insights.evaluation.incidents import (
+    Evaluation,
+    GroundTruth,
+    best_threshold,
+    evaluate_detector,
+    read_truth,
+    threshold_sweep,
+)
+from insights.evaluation.report import markdown_table, report_row, sweep_table
 from insights.loader import load_simulation
-from insights.series import event_period, hourly_counts
+from insights.series import Series, event_period, hourly_counts
 from insights.simulator.scenarios import MINIMUM_DAYS, default_catalogue
 from insights.simulator.sender import (
     SENT_FILE,
@@ -33,6 +40,7 @@ app = typer.Typer(no_args_is_help=True)
 
 DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore, "seasonal": SeasonalRobust}
 EVALUATION_END = datetime(2026, 10, 20)
+SWEEP_THRESHOLDS = tuple(2.0 + 0.5 * step for step in range(13))
 
 
 @app.callback()
@@ -201,6 +209,31 @@ def evaluate_command(
     typer.echo(markdown_table([report_row(detector, threshold, evaluations)]), nl=False)
 
 
+@app.command("tune")
+def tune_command(
+    seed: Annotated[int, typer.Option(min=0, help="Simulation seed to tune on.")] = 1,
+    detector: Annotated[
+        str, typer.Option(help=f"Detector to tune: {', '.join(DETECTORS)}.")
+    ] = "zscore",
+    days: Annotated[
+        int, typer.Option(min=MINIMUM_DAYS, help="Length of the simulated period in days.")
+    ] = 28,
+    end: Annotated[
+        datetime, typer.Option(help="End of the simulated period in UTC.")
+    ] = EVALUATION_END,
+) -> None:
+    check_detector(detector)
+    series_list, truth = simulate_series(seed, days, start_of_hour(end.replace(tzinfo=UTC)))
+    points = threshold_sweep(DETECTORS[detector](), series_list, truth, SWEEP_THRESHOLDS)
+    best = best_threshold(points)
+    typer.echo(sweep_table(points), nl=False)
+    typer.echo("")
+    typer.echo(
+        f"Best F1 for {detector} on seed {seed}: threshold {best.threshold:g} "
+        f"(F1 {best.evaluation.hours.f1:.2f})"
+    )
+
+
 def check_detector(name: str) -> None:
     if name not in DETECTORS:
         typer.echo(
@@ -223,6 +256,11 @@ def parse_seeds(text: str) -> list[int]:
 def evaluate_seed(
     seed: int, days: int, end: datetime, detector: Detector, threshold: float
 ) -> Evaluation:
+    series_list, truth = simulate_series(seed, days, end)
+    return evaluate_detector(detector, series_list, truth, threshold)
+
+
+def simulate_series(seed: int, days: int, end: datetime) -> tuple[list[Series], GroundTruth]:
     start = end - timedelta(days=days)
     catalogue = default_catalogue(seed, start, end)
     events = simulate(catalogue, start, end, seed)
@@ -233,7 +271,7 @@ def evaluate_seed(
         with Store(Path(work_dir) / "insights.duckdb") as store:
             load_simulation(store, sim_dir, datetime.now(UTC))
             series_list = hourly_counts(store, truth.start, truth.end)
-    return evaluate_detector(detector, series_list, truth, threshold)
+    return series_list, truth
 
 
 def seed_summary(seed: int, evaluation: Evaluation) -> str:

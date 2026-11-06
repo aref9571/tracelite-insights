@@ -485,3 +485,56 @@ def test_evaluate_command_refuses_an_unknown_detector():
 
     assert result.exit_code == 1
     assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
+
+
+def test_tune_command_prints_the_sweep_and_the_best_threshold():
+    result = runner.invoke(app, ["tune", "--seed", "1", "--days", "8"])
+
+    assert result.exit_code == 0
+    lines = result.stdout.splitlines()
+    assert (
+        lines[0] == "| Threshold | Precision | Recall | F1 | Incident recall | False alerts/week |"
+    )
+    thresholds = [line.split(" | ")[0].removeprefix("| ") for line in lines[2:15]]
+    assert thresholds == [
+        "2",
+        "2.5",
+        "3",
+        "3.5",
+        "4",
+        "4.5",
+        "5",
+        "5.5",
+        "6",
+        "6.5",
+        "7",
+        "7.5",
+        "8",
+    ]
+    assert lines[15] == ""
+    assert lines[16].startswith("Best F1 for zscore on seed 1: threshold ")
+
+
+def test_tune_command_accepts_the_seasonal_detector():
+    result = runner.invoke(app, ["tune", "--detector", "seasonal", "--days", "4"])
+
+    assert result.exit_code == 0
+    assert "Best F1 for seasonal on seed 1: threshold 2 (F1 0.00)" in result.stdout
+
+
+def test_tune_command_refuses_an_unknown_detector():
+    result = runner.invoke(app, ["tune", "--detector", "magic"])
+
+    assert result.exit_code == 1
+    assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
+
+
+def test_simulate_series_gives_one_series_per_application_and_environment():
+    end = datetime(2026, 10, 20, tzinfo=UTC)
+
+    series_list, truth = cli.simulate_series(2, 4, end)
+
+    assert len(series_list) == 6
+    assert all(len(series.counts) == 96 for series in series_list)
+    assert truth.start == end - timedelta(days=4)
+    assert len(truth.incidents) == 10
