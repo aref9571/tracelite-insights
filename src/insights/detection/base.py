@@ -42,3 +42,10 @@ def series_anomalies(detector: Detector, series: Series, threshold: float) -> li
         )
         for index in alert_hours
     ]
+
+
+def as_float_series(counts: np.ndarray) -> np.ndarray:
+    values = np.asarray(counts, dtype=np.float64)
+    if values.ndim != 1:
+        raise ValueError("counts must be a one-dimensional array")
+    return values

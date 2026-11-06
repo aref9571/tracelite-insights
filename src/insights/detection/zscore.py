@@ -1,6 +1,8 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
+from insights.detection.base import as_float_series
+
 STD_FLOOR = 1.0
 
 
@@ -37,10 +39,3 @@ class RollingZScore:
             mean[self.window_hours :] = previous_hours.mean(axis=1)
             std[self.window_hours :] = previous_hours.std(axis=1)
         return mean, std
-
-
-def as_float_series(counts: np.ndarray) -> np.ndarray:
-    values = np.asarray(counts, dtype=np.float64)
-    if values.ndim != 1:
-        raise ValueError("counts must be a one-dimensional array")
-    return values
