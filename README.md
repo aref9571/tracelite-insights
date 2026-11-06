@@ -150,13 +150,15 @@ insights detect --detector zscore --threshold 4
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--detector` | `zscore` | Detector to run |
+| `--detector` | `zscore` | Detector to run: `zscore` or `seasonal` |
 | `--threshold` | `4` | Score at or above which an hour is flagged |
 | `--database` | `INSIGHTS_DATABASE_PATH` | DuckDB database file; it must already exist |
 
 Each run replaces the earlier anomalies of the same detector. Rows of other detectors are kept.
 
 The `zscore` detector compares each hour with the 168 hours (one week) before it. The score is `(count - mean) / max(std, 1)`, where the mean and standard deviation come from those previous hours only, so a spike does not raise its own baseline. The floor of 1 keeps quiet series with an almost constant count from producing huge scores. An hour is flagged only if its score reaches the threshold and it has at least 3 errors. The first 168 hours of a series have no score.
+
+The `seasonal` detector compares each hour with the same hour of the week in the 3 weeks before it, together with the hour before and the hour after in each of those weeks (9 values). The expected count is the median of these values and the spread is their median absolute deviation (MAD) × 1.4826, but at least `sqrt(expected)` and at least 1. The score is `(count - expected) / spread`. Median and MAD are hardly moved by one unusual value in an earlier week, and comparing Monday 14:00 with earlier Mondays at 14:00 follows the daily and weekly pattern. The first 3 weeks and 1 hour of a series have no score.
 
 ## Evaluating detectors
 
@@ -169,9 +171,17 @@ insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4
 | Option | Default | Meaning |
 |---|---|---|
 | `--seeds` | `2,3,4,5` | Comma-separated simulation seeds |
-| `--detector` | `zscore` | Detector to evaluate |
+| `--detector` | `zscore` | Detector to evaluate: `zscore` or `seasonal` |
 | `--threshold` | `4` | Score at or above which an hour is flagged |
 | `--days` | `28` | Length of each simulated period, at least 4 days |
 | `--end` | `2026-10-20T00:00:00` | End of each simulated period in UTC; fixed so that the results can be reproduced |
 
 It prints one line per seed and a Markdown table with the mean ± standard deviation over the seeds of precision, recall and F1 per hour, incident recall, false alerts per week and median detection delay. [docs/evaluation.md](docs/evaluation.md) defines the metrics and records the results.
+
+`insights tune` chooses a threshold on a seed that is not used for reporting. It simulates one seed, evaluates the detector at the thresholds 2, 2.5, ..., 8, prints a table with one line per threshold and names the threshold with the best hour-level F1:
+
+```bash
+insights tune --seed 1 --detector seasonal --days 56
+```
+
+It takes `--seed` (default `1`), `--detector`, `--days` and `--end` with the same meaning and defaults as `insights evaluate`. When several thresholds share the best F1, the lowest one is chosen.
