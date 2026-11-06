@@ -9,6 +9,7 @@ import typer
 from insights import __version__
 from insights.config import Settings, get_settings
 from insights.detection.base import Detector, find_anomalies
+from insights.detection.seasonal import SeasonalRobust
 from insights.detection.zscore import RollingZScore
 from insights.evaluation.incidents import Evaluation, evaluate_detector, read_truth
 from insights.evaluation.report import markdown_table, report_row
@@ -30,7 +31,7 @@ from insights.tracelite_client import TraceLiteClient, TraceLiteConnectionError,
 
 app = typer.Typer(no_args_is_help=True)
 
-DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore}
+DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore, "seasonal": SeasonalRobust}
 EVALUATION_END = datetime(2026, 10, 20)
 
 

@@ -446,7 +446,7 @@ def test_detect_command_refuses_an_unknown_detector(tmp_path):
     )
 
     assert result.exit_code == 1
-    assert "unknown detector 'magic'; choose one of: zscore" in result.output
+    assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
 
 
 def test_evaluate_command_prints_one_line_per_seed_and_the_summary_table():
@@ -484,4 +484,4 @@ def test_evaluate_command_refuses_an_unknown_detector():
     result = runner.invoke(app, ["evaluate", "--detector", "magic"])
 
     assert result.exit_code == 1
-    assert "unknown detector 'magic'; choose one of: zscore" in result.output
+    assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
