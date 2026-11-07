@@ -7,13 +7,10 @@ import pytest
 
 from insights.detection.zscore import RollingZScore
 from insights.evaluation.incidents import (
-    Evaluation,
     GroundTruth,
     HourMetrics,
     IncidentMetrics,
     IncidentWindow,
-    SweepPoint,
-    best_threshold,
     evaluate_detector,
     hour_labels,
     hour_metrics,
@@ -237,14 +234,6 @@ def test_evaluate_detector_without_series_scores_nothing():
     assert evaluation.incidents.monitored_hours == 0
 
 
-def sweep_point(threshold, true_positives, false_positives, false_negatives):
-    hours = HourMetrics(true_positives, false_positives, false_negatives)
-    incidents = IncidentMetrics(
-        incidents=0, detected=0, false_alerts=0, monitored_hours=0, delays_hours=()
-    )
-    return SweepPoint(threshold, Evaluation(hours=hours, incidents=incidents))
-
-
 def test_threshold_sweep_evaluates_every_threshold_in_order():
     counts = [5] * 40
     counts[30] = 50
@@ -264,23 +253,6 @@ def test_threshold_sweep_without_thresholds_is_empty():
     truth = GroundTruth(start=hour(0), end=hour(10), incidents=())
 
     assert threshold_sweep(FixedAlerts({}), [], truth, []) == []
-
-
-def test_best_threshold_has_the_highest_hour_level_f1():
-    points = [sweep_point(2.0, 2, 8, 0), sweep_point(3.0, 2, 1, 0), sweep_point(4.0, 1, 0, 1)]
-
-    assert best_threshold(points).threshold == 3.0
-
-
-def test_best_threshold_keeps_the_first_of_equal_f1_values():
-    points = [sweep_point(2.0, 0, 3, 2), sweep_point(2.5, 1, 1, 1), sweep_point(3.0, 1, 1, 1)]
-
-    assert best_threshold(points).threshold == 2.5
-
-
-def test_best_threshold_needs_at_least_one_point():
-    with pytest.raises(ValueError, match="at least one threshold"):
-        best_threshold([])
 
 
 def test_read_truth_reads_period_and_incident_windows(tmp_path):

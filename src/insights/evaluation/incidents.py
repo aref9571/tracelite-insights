@@ -198,16 +198,6 @@ def threshold_sweep(
     ]
 
 
-def best_threshold(points: Sequence[SweepPoint]) -> SweepPoint:
-    if not points:
-        raise ValueError("a sweep needs at least one threshold")
-    best = points[0]
-    for point in points[1:]:
-        if point.evaluation.hours.f1 > best.evaluation.hours.f1:
-            best = point
-    return best
-
-
 def concatenate(arrays: list[np.ndarray]) -> np.ndarray:
     if not arrays:
         return np.array([], dtype=bool)

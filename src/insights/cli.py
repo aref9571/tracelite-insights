@@ -14,12 +14,11 @@ from insights.detection.zscore import RollingZScore
 from insights.evaluation.incidents import (
     Evaluation,
     GroundTruth,
-    best_threshold,
     evaluate_detector,
     read_truth,
     threshold_sweep,
 )
-from insights.evaluation.report import markdown_table, report_row, sweep_table
+from insights.evaluation.report import F1_COLUMN, best_row, markdown_table, report_row
 from insights.loader import load_simulation
 from insights.series import Series, event_period, hourly_counts
 from insights.simulator.scenarios import MINIMUM_DAYS, default_catalogue
@@ -211,7 +210,9 @@ def evaluate_command(
 
 @app.command("tune")
 def tune_command(
-    seed: Annotated[int, typer.Option(min=0, help="Simulation seed to tune on.")] = 1,
+    seeds: Annotated[
+        str, typer.Option(help="Comma-separated simulation seeds to tune on.")
+    ] = "1,6,7,8,9",
     detector: Annotated[
         str, typer.Option(help=f"Detector to tune: {', '.join(DETECTORS)}.")
     ] = "zscore",
@@ -223,14 +224,25 @@ def tune_command(
     ] = EVALUATION_END,
 ) -> None:
     check_detector(detector)
-    series_list, truth = simulate_series(seed, days, start_of_hour(end.replace(tzinfo=UTC)))
-    points = threshold_sweep(DETECTORS[detector](), series_list, truth, SWEEP_THRESHOLDS)
-    best = best_threshold(points)
-    typer.echo(sweep_table(points), nl=False)
+    try:
+        seed_list = parse_seeds(seeds)
+    except ValueError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1) from error
+    end_hour = start_of_hour(end.replace(tzinfo=UTC))
+    evaluations = {threshold: [] for threshold in SWEEP_THRESHOLDS}
+    for seed in seed_list:
+        series_list, truth = simulate_series(seed, days, end_hour)
+        for point in threshold_sweep(DETECTORS[detector](), series_list, truth, SWEEP_THRESHOLDS):
+            evaluations[point.threshold].append(point.evaluation)
+    rows = [report_row(detector, threshold, evaluations[threshold]) for threshold in evaluations]
+    best = best_row(rows)
+    typer.echo(markdown_table(rows), nl=False)
     typer.echo("")
+    seed_text = ",".join(map(str, seed_list))
     typer.echo(
-        f"Best F1 for {detector} on seed {seed}: threshold {best.threshold:g} "
-        f"(F1 {best.evaluation.hours.f1:.2f})"
+        f"Best mean F1 for {detector} on seeds {seed_text}: threshold {best.threshold:g} "
+        f"(F1 {best.summaries[F1_COLUMN].mean:.2f})"
     )
 
 

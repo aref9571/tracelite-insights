@@ -487,39 +487,39 @@ def test_evaluate_command_refuses_an_unknown_detector():
     assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
 
 
-def test_tune_command_prints_the_sweep_and_the_best_threshold():
-    result = runner.invoke(app, ["tune", "--seed", "1", "--days", "8"])
+def test_tune_command_prints_the_mean_sweep_and_the_best_threshold():
+    result = runner.invoke(app, ["tune", "--seeds", "1,6", "--days", "8"])
 
     assert result.exit_code == 0
     lines = result.stdout.splitlines()
-    assert (
-        lines[0] == "| Threshold | Precision | Recall | F1 | Incident recall | False alerts/week |"
-    )
-    thresholds = [line.split(" | ")[0].removeprefix("| ") for line in lines[2:15]]
-    assert thresholds == [
-        "2",
-        "2.5",
-        "3",
-        "3.5",
-        "4",
-        "4.5",
-        "5",
-        "5.5",
-        "6",
-        "6.5",
-        "7",
-        "7.5",
-        "8",
-    ]
+    assert lines[0].startswith("| Detector | Threshold | Precision | Recall | F1 |")
+    thresholds = [line.split(" | ")[1] for line in lines[2:15]]
+    assert thresholds == [f"{2 + step / 2:g}" for step in range(13)]
+    assert all(line.startswith("| zscore | ") for line in lines[2:15])
     assert lines[15] == ""
-    assert lines[16].startswith("Best F1 for zscore on seed 1: threshold ")
+    assert lines[16].startswith("Best mean F1 for zscore on seeds 1,6: threshold ")
+
+
+def test_tune_command_mean_over_one_seed_has_zero_spread():
+    result = runner.invoke(app, ["tune", "--seeds", "3", "--days", "8"])
+
+    assert result.exit_code == 0
+    assert "± 0.00 |" in result.stdout.splitlines()[2]
+
+
+@pytest.mark.parametrize("seeds", ["1,x", "", "1,1"])
+def test_tune_command_refuses_invalid_seeds(seeds):
+    result = runner.invoke(app, ["tune", "--seeds", seeds, "--days", "4"])
+
+    assert result.exit_code == 1
+    assert "Error: seeds" in result.output
 
 
 def test_tune_command_accepts_the_seasonal_detector():
-    result = runner.invoke(app, ["tune", "--detector", "seasonal", "--days", "4"])
+    result = runner.invoke(app, ["tune", "--seeds", "1", "--detector", "seasonal", "--days", "4"])
 
     assert result.exit_code == 0
-    assert "Best F1 for seasonal on seed 1: threshold 2 (F1 0.00)" in result.stdout
+    assert "Best mean F1 for seasonal on seeds 1: threshold 2 (F1 0.00)" in result.stdout
 
 
 def test_tune_command_refuses_an_unknown_detector():

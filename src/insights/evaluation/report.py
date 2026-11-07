@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from insights.evaluation.incidents import Evaluation, SweepPoint
+from insights.evaluation.incidents import Evaluation
 
 COLUMNS = (
     "Precision",
@@ -16,7 +16,7 @@ COLUMNS = (
 )
 
 
-SWEEP_COLUMNS = COLUMNS[:5]
+F1_COLUMN = COLUMNS.index("F1")
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,16 @@ def report_row(detector: str, threshold: float, evaluations: Sequence[Evaluation
     )
 
 
+def best_row(rows: Sequence[ReportRow]) -> ReportRow:
+    if not rows:
+        raise ValueError("choosing the best row needs at least one row")
+    best = rows[0]
+    for row in rows[1:]:
+        if row.summaries[F1_COLUMN].mean > best.summaries[F1_COLUMN].mean:
+            best = row
+    return best
+
+
 def format_summary(summary: Summary) -> str:
     if math.isnan(summary.mean):
         return "n/a"
@@ -77,18 +87,5 @@ def markdown_table(rows: Sequence[ReportRow]) -> str:
     ]
     for row in rows:
         cells = [row.detector, f"{row.threshold:g}", *map(format_summary, row.summaries)]
-        lines.append("| " + " | ".join(cells) + " |")
-    return "\n".join(lines) + "\n"
-
-
-def sweep_table(points: Sequence[SweepPoint]) -> str:
-    header = ["Threshold", *SWEEP_COLUMNS]
-    lines = [
-        "| " + " | ".join(header) + " |",
-        "|" + "--:|" * len(header),
-    ]
-    for point in points:
-        values = metric_values(point.evaluation)[: len(SWEEP_COLUMNS)]
-        cells = [f"{point.threshold:g}", *(f"{value:.2f}" for value in values)]
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"

@@ -2,15 +2,15 @@ import math
 
 import pytest
 
-from insights.evaluation.incidents import Evaluation, HourMetrics, IncidentMetrics, SweepPoint
+from insights.evaluation.incidents import Evaluation, HourMetrics, IncidentMetrics
 from insights.evaluation.report import (
     ReportRow,
     Summary,
+    best_row,
     markdown_table,
     metric_values,
     report_row,
     summarise,
-    sweep_table,
 )
 
 
@@ -105,17 +105,30 @@ def test_markdown_table_has_a_header_and_one_line_per_row():
     ]
 
 
-def test_sweep_table_has_one_line_per_threshold_without_delay():
-    points = [
-        SweepPoint(2.0, make_evaluation(2, 1, 1, detected=2, delays=[0.0])),
-        SweepPoint(2.5, make_evaluation(0, 0, 3, detected=0, delays=[])),
-    ]
+def f1_row(threshold, f1):
+    summaries = tuple(Summary(f1, 0.0) for _ in range(6))
+    return ReportRow(detector="zscore", threshold=threshold, summaries=summaries)
 
-    table = sweep_table(points)
 
-    assert table.splitlines() == [
-        "| Threshold | Precision | Recall | F1 | Incident recall | False alerts/week |",
-        "|--:|--:|--:|--:|--:|--:|",
-        "| 2 | 0.67 | 0.67 | 0.67 | 0.50 | 1.00 |",
-        "| 2.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |",
-    ]
+def test_best_row_has_the_highest_mean_f1():
+    rows = [f1_row(2.0, 0.1), f1_row(2.5, 0.3), f1_row(3.0, 0.2)]
+
+    assert best_row(rows).threshold == 2.5
+
+
+def test_best_row_looks_only_at_the_f1_column():
+    low_f1 = ReportRow("zscore", 2.0, (Summary(0.9, 0), Summary(0.9, 0), Summary(0.1, 0)) * 2)
+    high_f1 = ReportRow("zscore", 3.0, (Summary(0.1, 0), Summary(0.1, 0), Summary(0.5, 0)) * 2)
+
+    assert best_row([low_f1, high_f1]).threshold == 3.0
+
+
+def test_best_row_keeps_the_first_of_equal_f1_values():
+    rows = [f1_row(2.0, 0.1), f1_row(2.5, 0.3), f1_row(3.0, 0.3)]
+
+    assert best_row(rows).threshold == 2.5
+
+
+def test_best_row_needs_at_least_one_row():
+    with pytest.raises(ValueError, match="at least one row"):
+        best_row([])
