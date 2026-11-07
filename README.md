@@ -178,10 +178,10 @@ insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4
 
 It prints one line per seed and a Markdown table with the mean ± standard deviation over the seeds of precision, recall and F1 per hour, incident recall, false alerts per week and median detection delay. [docs/evaluation.md](docs/evaluation.md) defines the metrics and records the results.
 
-`insights tune` chooses a threshold on a seed that is not used for reporting. It simulates one seed, evaluates the detector at the thresholds 2, 2.5, ..., 8, prints a table with one line per threshold and names the threshold with the best hour-level F1:
+`insights tune` chooses a threshold on seeds that are not used for reporting. It simulates each seed, evaluates the detector at the thresholds 2, 2.5, ..., 8, prints a table with the mean ± standard deviation over the seeds for each threshold and names the threshold with the best mean hour-level F1:
 
 ```bash
-insights tune --seed 1 --detector seasonal --days 56
+insights tune --seeds 1,6,7,8,9 --detector seasonal --days 56
 ```
 
-It takes `--seed` (default `1`), `--detector`, `--days` and `--end` with the same meaning and defaults as `insights evaluate`. When several thresholds share the best F1, the lowest one is chosen.
+`--seeds` defaults to `1,6,7,8,9`; `--detector`, `--days` and `--end` have the same meaning and defaults as in `insights evaluate`. When several thresholds share the best F1, the lowest one is chosen.

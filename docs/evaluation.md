@@ -13,7 +13,7 @@ This file records how well the spike detectors find the incidents of the simulat
 
 The detector never sees `truth.json`. Each simulation has 10 incidents, 3 of them small on purpose (at most 2 hours, at most 6 times the normal rate of the affected failure types).
 
-Results are reported as the mean ± sample standard deviation over seeds 2, 3, 4 and 5. Seed 1 is kept for choosing thresholds, so the reported numbers never come from the data a threshold was tuned on.
+Results are reported as the mean ± sample standard deviation over seeds 2, 3, 4 and 5. Thresholds are chosen on other seeds (seed 1 for the baseline below, seeds 1, 6, 7, 8 and 9 for the comparison), so the reported numbers never come from the data a threshold was tuned on.
 
 ### Metrics
 
@@ -65,79 +65,84 @@ The `seasonal` detector compares each hour with the same hour of the week in the
 
 The seasonal detector needs 3 weeks and 1 hour of history. On 28 days it would have a score only in the last 167 hours, so both detectors are compared on 56 days instead. On 56 days, 1 of the 10 incidents of each seed starts during the warm-up of the z-score detector, and 3 or 4 start during the warm-up of the seasonal detector (14 of the 40 incidents of seeds 2 to 5). Incidents in the warm-up still count as missed.
 
-### Choosing the thresholds on seed 1
+### Choosing the thresholds
 
 ```bash
-insights tune --seed 1 --detector zscore --days 56
-insights tune --seed 1 --detector seasonal --days 56
+insights tune --seeds 1,6,7,8,9 --detector zscore --days 56
+insights tune --seeds 1,6,7,8,9 --detector seasonal --days 56
 ```
 
-Rolling z-score on seed 1:
+Each threshold from 2 to 8 in steps of 0.5 is evaluated on the five tuning seeds, and the threshold with the highest mean hour-level F1 is chosen. None of the tuning seeds is used for reporting.
 
-| Threshold | Precision | Recall | F1 | Incident recall | False alerts/week |
-|--:|--:|--:|--:|--:|--:|
-| 2 | 0.02 | 0.23 | 0.03 | 0.40 | 41.71 |
-| 2.5 | 0.04 | 0.23 | 0.07 | 0.40 | 17.43 |
-| 3 | 0.05 | 0.18 | 0.08 | 0.30 | 10.14 |
-| 3.5 | 0.11 | 0.18 | 0.14 | 0.30 | 4.43 |
-| 4 | 0.17 | 0.18 | 0.18 | 0.30 | 2.71 |
-| 4.5 | 0.25 | 0.14 | 0.18 | 0.20 | 1.29 |
-| 5 | 0.22 | 0.09 | 0.13 | 0.10 | 1.00 |
-| 5.5 | 0.33 | 0.05 | 0.08 | 0.10 | 0.29 |
-| 6 | 0.00 | 0.00 | 0.00 | 0.00 | 0.29 |
-| 6.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.14 |
-| 7 | 0.00 | 0.00 | 0.00 | 0.00 | 0.14 |
-| 7.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.14 |
-| 8 | 0.00 | 0.00 | 0.00 | 0.00 | 0.14 |
+Rolling z-score on seeds 1, 6, 7, 8 and 9:
 
-Seasonal median on seed 1:
+| Detector | Threshold | Precision | Recall | F1 | Incident recall | False alerts/week | Median delay (h) |
+|:--|--:|--:|--:|--:|--:|--:|--:|
+| zscore | 2 | 0.02 ± 0.00 | 0.27 ± 0.08 | 0.04 ± 0.01 | 0.42 ± 0.08 | 41.14 ± 1.62 | 0.00 ± 0.00 |
+| zscore | 2.5 | 0.04 ± 0.02 | 0.22 ± 0.10 | 0.06 ± 0.03 | 0.38 ± 0.11 | 18.60 ± 2.02 | 0.10 ± 0.22 |
+| zscore | 3 | 0.06 ± 0.03 | 0.17 ± 0.09 | 0.09 ± 0.05 | 0.28 ± 0.11 | 9.20 ± 1.85 | 0.20 ± 0.45 |
+| zscore | 3.5 | 0.10 ± 0.05 | 0.13 ± 0.07 | 0.11 ± 0.06 | 0.22 ± 0.08 | 3.71 ± 0.87 | 0.20 ± 0.45 |
+| zscore | 4 | 0.18 ± 0.06 | 0.13 ± 0.07 | 0.15 ± 0.07 | 0.22 ± 0.08 | 1.74 ± 0.58 | 0.20 ± 0.45 |
+| zscore | 4.5 | 0.34 ± 0.21 | 0.10 ± 0.06 | 0.15 ± 0.09 | 0.18 ± 0.11 | 0.54 ± 0.44 | 0.12 ± 0.25 |
+| zscore | 5 | 0.51 ± 0.40 | 0.09 ± 0.07 | 0.14 ± 0.11 | 0.14 ± 0.11 | 0.29 ± 0.42 | 0.25 ± 0.50 |
+| zscore | 5.5 | 0.47 ± 0.51 | 0.05 ± 0.06 | 0.09 ± 0.11 | 0.08 ± 0.08 | 0.06 ± 0.13 | 0.67 ± 0.58 |
+| zscore | 6 | 0.40 ± 0.55 | 0.04 ± 0.07 | 0.07 ± 0.12 | 0.06 ± 0.09 | 0.06 ± 0.13 | 0.50 ± 0.71 |
+| zscore | 6.5 | 0.40 ± 0.55 | 0.04 ± 0.07 | 0.07 ± 0.12 | 0.06 ± 0.09 | 0.03 ± 0.06 | 0.50 ± 0.71 |
+| zscore | 7 | 0.40 ± 0.55 | 0.04 ± 0.07 | 0.07 ± 0.12 | 0.06 ± 0.09 | 0.03 ± 0.06 | 0.50 ± 0.71 |
+| zscore | 7.5 | 0.40 ± 0.55 | 0.04 ± 0.07 | 0.07 ± 0.12 | 0.06 ± 0.09 | 0.03 ± 0.06 | 0.50 ± 0.71 |
+| zscore | 8 | 0.40 ± 0.55 | 0.03 ± 0.05 | 0.06 ± 0.08 | 0.06 ± 0.09 | 0.03 ± 0.06 | 0.50 ± 0.71 |
 
-| Threshold | Precision | Recall | F1 | Incident recall | False alerts/week |
-|--:|--:|--:|--:|--:|--:|
-| 2 | 0.02 | 0.27 | 0.03 | 0.50 | 68.28 |
-| 2.5 | 0.02 | 0.09 | 0.03 | 0.20 | 24.23 |
-| 3 | 0.02 | 0.09 | 0.04 | 0.20 | 16.02 |
-| 3.5 | 0.00 | 0.00 | 0.00 | 0.00 | 4.81 |
-| 4 | 0.00 | 0.00 | 0.00 | 0.00 | 3.20 |
-| 4.5 | 0.00 | 0.00 | 0.00 | 0.00 | 1.80 |
-| 5 | 0.00 | 0.00 | 0.00 | 0.00 | 1.00 |
-| 5.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.20 |
-| 6 | 0.00 | 0.00 | 0.00 | 0.00 | 0.20 |
-| 6.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
-| 7 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
-| 7.5 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
-| 8 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+Seasonal median on seeds 1, 6, 7, 8 and 9:
 
-The best hour-level F1 on seed 1 is at threshold 4 for `zscore` (F1 0.18) and at threshold 3 for `seasonal` (F1 0.04).
+| Detector | Threshold | Precision | Recall | F1 | Incident recall | False alerts/week | Median delay (h) |
+|:--|--:|--:|--:|--:|--:|--:|--:|
+| seasonal | 2 | 0.01 ± 0.00 | 0.20 ± 0.07 | 0.02 ± 0.01 | 0.34 ± 0.13 | 70.36 ± 2.31 | 0.10 ± 0.22 |
+| seasonal | 2.5 | 0.03 ± 0.01 | 0.14 ± 0.07 | 0.05 ± 0.02 | 0.24 ± 0.11 | 22.15 ± 1.69 | 0.10 ± 0.22 |
+| seasonal | 3 | 0.04 ± 0.02 | 0.13 ± 0.08 | 0.06 ± 0.03 | 0.24 ± 0.11 | 14.38 ± 1.33 | 0.10 ± 0.22 |
+| seasonal | 3.5 | 0.09 ± 0.06 | 0.09 ± 0.08 | 0.09 ± 0.07 | 0.14 ± 0.11 | 4.41 ± 0.99 | 0.12 ± 0.25 |
+| seasonal | 4 | 0.10 ± 0.07 | 0.09 ± 0.08 | 0.09 ± 0.07 | 0.14 ± 0.11 | 3.56 ± 0.77 | 0.12 ± 0.25 |
+| seasonal | 4.5 | 0.21 ± 0.14 | 0.07 ± 0.08 | 0.10 ± 0.10 | 0.12 ± 0.11 | 1.20 ± 0.51 | 0.25 ± 0.50 |
+| seasonal | 5 | 0.23 ± 0.15 | 0.06 ± 0.06 | 0.08 ± 0.08 | 0.10 ± 0.07 | 0.76 ± 0.26 | 0.50 ± 0.58 |
+| seasonal | 5.5 | 0.35 ± 0.49 | 0.04 ± 0.07 | 0.06 ± 0.11 | 0.06 ± 0.09 | 0.08 ± 0.11 | 0.50 ± 0.71 |
+| seasonal | 6 | 0.35 ± 0.49 | 0.04 ± 0.07 | 0.06 ± 0.11 | 0.06 ± 0.09 | 0.08 ± 0.11 | 0.50 ± 0.71 |
+| seasonal | 6.5 | 0.40 ± 0.55 | 0.04 ± 0.07 | 0.07 ± 0.12 | 0.06 ± 0.09 | 0.00 ± 0.00 | 0.50 ± 0.71 |
+| seasonal | 7 | 0.40 ± 0.55 | 0.04 ± 0.07 | 0.07 ± 0.12 | 0.06 ± 0.09 | 0.00 ± 0.00 | 0.50 ± 0.71 |
+| seasonal | 7.5 | 0.40 ± 0.55 | 0.03 ± 0.05 | 0.05 ± 0.08 | 0.04 ± 0.05 | 0.00 ± 0.00 | 0.50 ± 0.71 |
+| seasonal | 8 | 0.40 ± 0.55 | 0.03 ± 0.05 | 0.05 ± 0.08 | 0.04 ± 0.05 | 0.00 ± 0.00 | 0.50 ± 0.71 |
+
+The best mean F1 is at threshold 4.5 for both detectors: 0.10 for `seasonal`, and 0.153 for `zscore`, just above its 0.146 at threshold 4 (both round to 0.15 in the table).
+
+A first attempt tuned on seed 1 alone, as for the baseline. It chose threshold 3 for the seasonal detector, where it raised about 16 false alerts per week on seeds 2 to 5. Seed 1 has only short incidents after the seasonal warm-up, and the seasonal F1 on seed 1 stays at or below 0.04 for every threshold, so a single seed gave almost no evidence. Averaging over five seeds makes the choice much less dependent on one simulation.
 
 ### Results on seeds 2 to 5
 
 ```bash
-insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4 --days 56
-insights evaluate --seeds 2,3,4,5 --detector seasonal --threshold 3 --days 56
+insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4.5 --days 56
+insights evaluate --seeds 2,3,4,5 --detector seasonal --threshold 4.5 --days 56
 ```
 
 | Detector | Threshold | Precision | Recall | F1 | Incident recall | False alerts/week | Median delay (h) |
 |:--|--:|--:|--:|--:|--:|--:|--:|
-| zscore | 4 | 0.39 ± 0.14 | 0.24 ± 0.08 | 0.30 ± 0.10 | 0.38 ± 0.10 | 1.50 ± 0.44 | 0.25 ± 0.50 |
-| seasonal | 3 | 0.11 ± 0.06 | 0.33 ± 0.11 | 0.16 ± 0.08 | 0.38 ± 0.10 | 16.17 ± 1.35 | 0.25 ± 0.50 |
+| zscore | 4.5 | 0.52 ± 0.20 | 0.18 ± 0.10 | 0.26 ± 0.13 | 0.30 ± 0.08 | 0.64 ± 0.38 | 0.38 ± 0.48 |
+| seasonal | 4.5 | 0.53 ± 0.18 | 0.21 ± 0.12 | 0.29 ± 0.14 | 0.25 ± 0.06 | 1.00 ± 0.37 | 0.50 ± 0.58 |
 
 Per seed:
 
 | Seed | Detector | Precision | Recall | F1 | Incidents detected | False alerts | Monitored hours |
 |--:|:--|--:|--:|--:|--:|--:|--:|
-| 2 | zscore | 0.47 | 0.26 | 0.33 | 3 of 10 | 8 | 1176 |
-| 2 | seasonal | 0.08 | 0.30 | 0.13 | 3 of 10 | 87 | 839 |
-| 3 | zscore | 0.55 | 0.34 | 0.42 | 4 of 10 | 10 | 1176 |
-| 3 | seasonal | 0.19 | 0.49 | 0.27 | 5 of 10 | 72 | 839 |
-| 4 | zscore | 0.25 | 0.16 | 0.19 | 5 of 10 | 15 | 1176 |
-| 4 | seasonal | 0.10 | 0.28 | 0.15 | 4 of 10 | 79 | 839 |
-| 5 | zscore | 0.31 | 0.19 | 0.24 | 3 of 10 | 9 | 1176 |
-| 5 | seasonal | 0.06 | 0.24 | 0.09 | 3 of 10 | 85 | 839 |
+| 2 | zscore | 0.78 | 0.26 | 0.39 | 3 of 10 | 2 | 1176 |
+| 2 | seasonal | 0.42 | 0.19 | 0.26 | 2 of 10 | 7 | 839 |
+| 3 | zscore | 0.53 | 0.26 | 0.35 | 4 of 10 | 8 | 1176 |
+| 3 | seasonal | 0.68 | 0.37 | 0.48 | 3 of 10 | 6 | 839 |
+| 4 | zscore | 0.29 | 0.06 | 0.10 | 2 of 10 | 5 | 1176 |
+| 4 | seasonal | 0.67 | 0.19 | 0.29 | 3 of 10 | 3 | 839 |
+| 5 | zscore | 0.50 | 0.14 | 0.22 | 3 of 10 | 3 | 1176 |
+| 5 | seasonal | 0.33 | 0.10 | 0.15 | 2 of 10 | 4 | 839 |
 
 Observations:
 
-- Both detectors find 15 of the 40 incidents, but not the same way. The seasonal detector can reach only the 26 incidents after its warm-up and finds 15 of them; the z-score detector can reach 36 and finds 15. Its hour-level recall is also higher (0.33 against 0.24): inside the incidents each detector finds, the seasonal detector flags 39 of 50 incident hours and the z-score detector 28 of 45.
-- The price is the false alerts: about 16 per week against 1.5. 228 of the 323 false alerts of the seasonal detector over the four seeds are hours whose expected count is 0 or 1. There the spread is at its floor of 1, so 3 or 4 errors in a usually quiet hour already reach the threshold of 3. 204 of the 323 are in the staging series, which have about one error per hour. The z-score detector does not flag hours with fewer than 3 errors, which removes most of these cases; the seasonal detector has no such rule.
-- The thresholds come from a single seed, and seed 1 is a poor tuning seed for the seasonal detector: after its warm-up, seed 1 has 7 incidents that last at most 2 hours, and its F1 on seed 1 is at most 0.04 for every threshold. The choice of 3 therefore rests on very little evidence and leads to a low threshold with many false alerts on the other seeds. Tuning on several seeds would make the choice more stable.
-- The tests in `tests/test_detection_seasonal.py` show the cases the seasonal detector is built for: on a series with a sharp two-hour daily peak and no incident it flags far fewer hours than the z-score detector at the same threshold, and it catches a spike at a usually quiet hour that the z-score detector misses. The simulated daily cycle is gentler, so this advantage hardly shows in the numbers above.
+- The seasonal detector has a slightly higher hour-level F1 (0.29 against 0.26) and recall (0.21 against 0.18) at the same precision, but the difference is well inside the spread between seeds. On this data the two detectors perform about the same.
+- Its incident recall is lower (0.25 against 0.30), but most of that is the warm-up: it finds 10 of the 26 incidents it can reach, the z-score detector 12 of the 36 it can reach. Inside the incidents each detector finds, the seasonal detector flags 26 of 39 incident hours, the z-score detector 21 of 35.
+- The false alerts differ in kind. 16 of the 18 false alerts of the z-score detector fall between 09:00 and 19:00 UTC, the busy part of the simulated day that the weekly mean treats as unusual. 13 of the 20 false alerts of the seasonal detector fall outside these hours, where a few errors at a usually quiet hour are unusual for that hour. Per week of scored hours the seasonal detector raises 1.0 false alerts, the z-score detector 0.64.
+- The z-score detector ignores hours with fewer than 3 errors. The seasonal detector needs no such rule at these thresholds: its spread is at least 1 and its expected count at least 0, so a score of 3 or more already needs at least 3 errors.
+- The tests in `tests/test_detection_seasonal.py` show the cases the seasonal detector is built for: on a series with a sharp two-hour daily peak and no incident it flags far fewer hours than the z-score detector at the same threshold, and it catches a spike at a usually quiet hour that the z-score detector misses. The simulated daily cycle is gentler, so this advantage shows only weakly in the numbers above.
