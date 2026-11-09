@@ -16,6 +16,7 @@ dependencies = [
     "duckdb>=1.5",
     "numpy>=2.5",
     "pytz>=2026.5",
+    "matplotlib>=3.11",
 ]
 
 [project.optional-dependencies]

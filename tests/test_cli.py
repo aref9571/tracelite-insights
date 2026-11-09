@@ -10,6 +10,7 @@ from insights import cli
 from insights.cli import app
 from insights.config import Settings, get_settings
 from insights.domain import Event, Issue, IssueStatus
+from insights.evaluation.incidents import evaluate_detector
 from insights.store import Store
 
 runner = CliRunner()
@@ -462,14 +463,105 @@ def test_evaluate_command_prints_one_line_per_seed_and_the_summary_table():
     assert lines[5].startswith("| zscore | 4 | ")
 
 
-def test_evaluate_seed_with_the_same_seed_gives_the_same_evaluation():
+def test_evaluating_the_same_seed_twice_gives_the_same_evaluation():
     end = datetime(2026, 10, 20, tzinfo=UTC)
 
-    first = cli.evaluate_seed(3, 8, end, cli.RollingZScore(), 4.0)
-    second = cli.evaluate_seed(3, 8, end, cli.RollingZScore(), 4.0)
+    first = evaluate_once(3, 8, end)
+    second = evaluate_once(3, 8, end)
 
     assert first == second
     assert first.incidents.incidents == 10
+
+
+def evaluate_once(seed, days, end):
+    series_list, truth = cli.simulate_series(seed, days, end)
+    return evaluate_detector(cli.RollingZScore(), series_list, truth, 4.0)
+
+
+def test_evaluate_command_without_plots_writes_no_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["evaluate", "--seeds", "1", "--days", "8"])
+
+    assert result.exit_code == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_evaluate_command_with_plots_writes_both_pngs(tmp_path):
+    folder = tmp_path / "img"
+
+    result = runner.invoke(
+        app, ["evaluate", "--seeds", "1,2", "--days", "8", "--plots", str(folder)]
+    )
+
+    assert result.exit_code == 0
+    assert sorted(path.name for path in folder.iterdir()) == [
+        "precision-recall.png",
+        "series-alerts-zscore.png",
+    ]
+    assert all(path.stat().st_size > 0 for path in folder.iterdir())
+    assert f"Wrote {folder / 'series-alerts-zscore.png'} and " in result.stdout
+
+
+def test_evaluate_command_names_the_series_plot_after_the_detector(tmp_path):
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--seeds",
+            "1",
+            "--detector",
+            "seasonal",
+            "--days",
+            "8",
+            "--plots",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (tmp_path / "series-alerts-seasonal.png").exists()
+
+
+def test_busiest_series_is_the_one_with_most_incidents():
+    series_list, truth = cli.simulate_series(2, 8, datetime(2026, 10, 20, tzinfo=UTC))
+
+    busiest = cli.busiest_series(series_list, truth)
+
+    counts = {
+        series.key: sum(1 for incident in truth.incidents if incident.series_key == series.key)
+        for series in series_list
+    }
+    assert counts[busiest.key] == max(counts.values())
+
+
+def test_sweep_rows_gives_one_row_per_threshold():
+    simulations = [
+        cli.simulate_series(seed, 8, datetime(2026, 10, 20, tzinfo=UTC)) for seed in (1, 2)
+    ]
+
+    rows = cli.sweep_rows("zscore", simulations)
+
+    assert [row.threshold for row in rows] == list(cli.SWEEP_THRESHOLDS)
+    assert all(row.detector == "zscore" for row in rows)
+
+
+def test_dispersion_command_prints_one_row_per_series():
+    result = runner.invoke(app, ["dispersion", "--seeds", "1,2", "--days", "14"])
+
+    assert result.exit_code == 0
+    lines = result.stdout.splitlines()
+    assert lines[0].startswith("| Series | Errors/hour outside incidents |")
+    assert len(lines) == 2 + 6
+    assert lines[2].startswith("| auth-service / production | ")
+
+
+@pytest.mark.parametrize("seeds", ["1,x", "", "1,1"])
+def test_dispersion_command_refuses_invalid_seeds(seeds):
+    result = runner.invoke(app, ["dispersion", "--seeds", seeds, "--days", "4"])
+
+    assert result.exit_code == 1
+    assert "Error: seeds" in result.output
 
 
 @pytest.mark.parametrize("seeds", ["2,x", "", "2,,3", "-1", "2,3,2"])

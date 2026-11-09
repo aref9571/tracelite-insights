@@ -11,6 +11,7 @@ from insights.config import Settings, get_settings
 from insights.detection.base import Detector, find_anomalies
 from insights.detection.seasonal import SeasonalRobust
 from insights.detection.zscore import RollingZScore
+from insights.evaluation.dispersion import dispersion
 from insights.evaluation.incidents import (
     Evaluation,
     GroundTruth,
@@ -18,7 +19,16 @@ from insights.evaluation.incidents import (
     read_truth,
     threshold_sweep,
 )
-from insights.evaluation.report import F1_COLUMN, best_row, markdown_table, report_row
+from insights.evaluation.plots import plot_precision_recall, plot_series_with_alerts
+from insights.evaluation.report import (
+    F1_COLUMN,
+    ReportRow,
+    best_row,
+    format_summary,
+    markdown_table,
+    report_row,
+    summarise,
+)
 from insights.loader import load_simulation
 from insights.series import Series, event_period, hourly_counts
 from insights.simulator.scenarios import MINIMUM_DAYS, default_catalogue
@@ -40,6 +50,7 @@ app = typer.Typer(no_args_is_help=True)
 DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore, "seasonal": SeasonalRobust}
 EVALUATION_END = datetime(2026, 10, 20)
 SWEEP_THRESHOLDS = tuple(2.0 + 0.5 * step for step in range(13))
+CHOSEN_THRESHOLDS = {"zscore": 4.5, "seasonal": 4.5}
 
 
 @app.callback()
@@ -191,6 +202,9 @@ def evaluate_command(
     end: Annotated[
         datetime, typer.Option(help="End of each simulated period in UTC.")
     ] = EVALUATION_END,
+    plots: Annotated[
+        Path | None, typer.Option(help="Folder for the PNG plots; no plots are drawn without it.")
+    ] = None,
 ) -> None:
     check_detector(detector)
     try:
@@ -199,13 +213,16 @@ def evaluate_command(
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1) from error
     end_hour = start_of_hour(end.replace(tzinfo=UTC))
+    simulations = [simulate_series(seed, days, end_hour) for seed in seed_list]
     evaluations = []
-    for seed in seed_list:
-        evaluation = evaluate_seed(seed, days, end_hour, DETECTORS[detector](), threshold)
+    for seed, (series_list, truth) in zip(seed_list, simulations, strict=True):
+        evaluation = evaluate_detector(DETECTORS[detector](), series_list, truth, threshold)
         typer.echo(seed_summary(seed, evaluation))
         evaluations.append(evaluation)
     typer.echo("")
     typer.echo(markdown_table([report_row(detector, threshold, evaluations)]), nl=False)
+    if plots is not None:
+        write_plots(plots, detector, threshold, simulations)
 
 
 @app.command("tune")
@@ -230,12 +247,8 @@ def tune_command(
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1) from error
     end_hour = start_of_hour(end.replace(tzinfo=UTC))
-    evaluations = {threshold: [] for threshold in SWEEP_THRESHOLDS}
-    for seed in seed_list:
-        series_list, truth = simulate_series(seed, days, end_hour)
-        for point in threshold_sweep(DETECTORS[detector](), series_list, truth, SWEEP_THRESHOLDS):
-            evaluations[point.threshold].append(point.evaluation)
-    rows = [report_row(detector, threshold, evaluations[threshold]) for threshold in evaluations]
+    simulations = [simulate_series(seed, days, end_hour) for seed in seed_list]
+    rows = sweep_rows(detector, simulations)
     best = best_row(rows)
     typer.echo(markdown_table(rows), nl=False)
     typer.echo("")
@@ -244,6 +257,48 @@ def tune_command(
         f"Best mean F1 for {detector} on seeds {seed_text}: threshold {best.threshold:g} "
         f"(F1 {best.summaries[F1_COLUMN].mean:.2f})"
     )
+
+
+@app.command("dispersion")
+def dispersion_command(
+    seeds: Annotated[
+        str, typer.Option(help="Comma-separated simulation seeds to measure.")
+    ] = "2,3,4,5",
+    days: Annotated[
+        int, typer.Option(min=MINIMUM_DAYS, help="Length of each simulated period in days.")
+    ] = 28,
+    end: Annotated[
+        datetime, typer.Option(help="End of each simulated period in UTC.")
+    ] = EVALUATION_END,
+) -> None:
+    try:
+        seed_list = parse_seeds(seeds)
+    except ValueError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1) from error
+    end_hour = start_of_hour(end.replace(tzinfo=UTC))
+    measured: dict[tuple, list] = {}
+    for seed in seed_list:
+        series_list, truth = simulate_series(seed, days, end_hour)
+        for series in series_list:
+            measured.setdefault(series.key, []).append(dispersion(series, truth.incidents))
+    typer.echo(dispersion_table(measured), nl=False)
+
+
+def dispersion_table(measured: dict[tuple, list]) -> str:
+    lines = [
+        "| Series | Errors/hour outside incidents | Variance/mean, whole series "
+        "| Variance/mean, same hour of the week |",
+        "|:--|--:|--:|--:|",
+    ]
+    for key in sorted(measured):
+        results = measured[key]
+        cells = [
+            format_summary(summarise([getattr(result, name) for result in results]))
+            for name in ("mean_count", "whole_series_ratio", "same_hour_ratio")
+        ]
+        lines.append(f"| {' / '.join(key)} | " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
 
 
 def check_detector(name: str) -> None:
@@ -265,11 +320,38 @@ def parse_seeds(text: str) -> list[int]:
     return seeds
 
 
-def evaluate_seed(
-    seed: int, days: int, end: datetime, detector: Detector, threshold: float
-) -> Evaluation:
-    series_list, truth = simulate_series(seed, days, end)
-    return evaluate_detector(detector, series_list, truth, threshold)
+def sweep_rows(
+    detector: str, simulations: list[tuple[list[Series], GroundTruth]]
+) -> list[ReportRow]:
+    evaluations = {threshold: [] for threshold in SWEEP_THRESHOLDS}
+    for series_list, truth in simulations:
+        for point in threshold_sweep(DETECTORS[detector](), series_list, truth, SWEEP_THRESHOLDS):
+            evaluations[point.threshold].append(point.evaluation)
+    return [report_row(detector, threshold, evaluations[threshold]) for threshold in evaluations]
+
+
+def write_plots(
+    folder: Path,
+    detector: str,
+    threshold: float,
+    simulations: list[tuple[list[Series], GroundTruth]],
+) -> None:
+    series_list, truth = simulations[0]
+    series = busiest_series(series_list, truth)
+    alerts = DETECTORS[detector]().alerts(series.counts, threshold)
+    series_path = folder / f"series-alerts-{detector}.png"
+    plot_series_with_alerts(series, alerts, truth.incidents, series_path)
+    sweeps = {name: sweep_rows(name, simulations) for name in DETECTORS}
+    curve_path = folder / "precision-recall.png"
+    plot_precision_recall(sweeps, CHOSEN_THRESHOLDS, curve_path)
+    typer.echo(f"Wrote {series_path} and {curve_path}")
+
+
+def busiest_series(series_list: list[Series], truth: GroundTruth) -> Series:
+    def incident_count(series: Series) -> int:
+        return sum(1 for incident in truth.incidents if incident.series_key == series.key)
+
+    return max(series_list, key=incident_count)
 
 
 def simulate_series(seed: int, days: int, end: datetime) -> tuple[list[Series], GroundTruth]:
