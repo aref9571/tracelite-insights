@@ -175,8 +175,11 @@ insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4
 | `--threshold` | `4` | Score at or above which an hour is flagged |
 | `--days` | `28` | Length of each simulated period, at least 4 days |
 | `--end` | `2026-10-20T00:00:00` | End of each simulated period in UTC; fixed so that the results can be reproduced |
+| `--plots` | none | Folder for the PNG plots; without it no plot is drawn |
 
 It prints one line per seed and a Markdown table with the mean ± standard deviation over the seeds of precision, recall and F1 per hour, incident recall, false alerts per week and median detection delay. [docs/evaluation.md](docs/evaluation.md) defines the metrics and records the results.
+
+With `--plots docs/img`, `insights evaluate` also writes two PNG files: `series-alerts-<detector>.png` shows the hourly errors of the series with the most incidents of the first seed, with the incident windows shaded and the flagged hours marked, and `precision-recall.png` shows the precision and recall of every threshold from 2 to 8 for both detectors, with the chosen thresholds circled.
 
 `insights tune` chooses a threshold on seeds that are not used for reporting. It simulates each seed, evaluates the detector at the thresholds 2, 2.5, ..., 8, prints a table with the mean ± standard deviation over the seeds for each threshold and names the threshold with the best mean hour-level F1:
 
@@ -185,3 +188,11 @@ insights tune --seeds 1,6,7,8,9 --detector seasonal --days 56
 ```
 
 `--seeds` defaults to `1,6,7,8,9`; `--detector`, `--days` and `--end` have the same meaning and defaults as in `insights evaluate`. When several thresholds share the best F1, the lowest one is chosen.
+
+`insights dispersion` measures how far the simulated hourly counts are from a Poisson distribution, as the ratio of variance to mean for the whole series and for the same hour of the week:
+
+```bash
+insights dispersion --seeds 2,3,4,5 --days 56
+```
+
+`--seeds`, `--days` and `--end` have the same meaning and defaults as in `insights evaluate`. [docs/statistics.md](docs/statistics.md) explains the statistics behind the detectors and the metrics.

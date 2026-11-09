@@ -146,3 +146,22 @@ Observations:
 - The false alerts differ in kind. 16 of the 18 false alerts of the z-score detector fall between 09:00 and 19:00 UTC, the busy part of the simulated day that the weekly mean treats as unusual. 13 of the 20 false alerts of the seasonal detector fall outside these hours, where a few errors at a usually quiet hour are unusual for that hour. Per week of scored hours the seasonal detector raises 1.0 false alerts, the z-score detector 0.64.
 - The z-score detector ignores hours with fewer than 3 errors. The seasonal detector needs no such rule at these thresholds: its spread is at least 1 and its expected count at least 0, so a score of 3 or more already needs at least 3 errors.
 - The tests in `tests/test_detection_seasonal.py` show the cases the seasonal detector is built for: on a series with a sharp two-hour daily peak and no incident it flags far fewer hours than the z-score detector at the same threshold, and it catches a spike at a usually quiet hour that the z-score detector misses. The simulated daily cycle is gentler, so this advantage shows only weakly in the numbers above.
+
+## Plots
+
+```bash
+insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4.5 --days 56 --plots docs/img
+insights evaluate --seeds 2,3,4,5 --detector seasonal --threshold 4.5 --days 56 --plots docs/img
+```
+
+Each run writes two files into the folder: `series-alerts-<detector>.png` and `precision-recall.png`. The second command writes the same `precision-recall.png` again, because that plot always holds the curves of both detectors for thresholds 2 to 8, drawn from the mean precision and recall over the seeds given, with the thresholds of 4.5 circled (`CHOSEN_THRESHOLDS` in `cli.py`, taken from the tuning above). The series plot shows the series with the most incidents of the first seed (seed 2: `catalog-service` in `production`) with the flags of the detector that was run, at the threshold given.
+
+![Precision and recall for thresholds 2 to 8](img/precision-recall.png)
+
+![Alerts of the z-score detector](img/series-alerts-zscore.png)
+
+![Alerts of the seasonal detector](img/series-alerts-seasonal.png)
+
+In this series 4 incidents are drawn. The z-score detector flags the incident of 14 September with 2 hours and the one of 19 October with 3 hours, and nothing else. The seasonal detector cannot score the 14 September incident, which lies in its 3-week warm-up; it flags the 19 October incident with 3 hours and raises one false alert on 6 October. The two incidents of 9 September and 13 October stay below the threshold for both detectors.
+
+[statistics.md](statistics.md) explains the scores, the variance-to-mean ratio of the simulated counts and how to read the precision and recall curve.
