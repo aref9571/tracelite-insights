@@ -59,9 +59,9 @@ SCORE_SWEEP = tuple(2.0 + 0.5 * step for step in range(13))
 SWEEP_THRESHOLDS = {
     "zscore": SCORE_SWEEP,
     "seasonal": SCORE_SWEEP,
-    "isolation": tuple(0.025 * step for step in range(13)),
+    "isolation": tuple(round(0.025 * step, 3) for step in range(13)),
 }
-CHOSEN_THRESHOLDS = {"zscore": 4.5, "seasonal": 4.5, "isolation": 0.2}
+CHOSEN_THRESHOLDS = {"zscore": 4.5, "seasonal": 4.5, "isolation": 0.225}
 
 
 @app.callback()
