@@ -350,7 +350,7 @@ DETECT_START = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
 SPIKE_HOUR = 170
 
 
-def create_database_with_spike(database):
+def create_database_with_spike(database, hours=180, spike_hour=SPIKE_HOUR):
     issue = Issue(
         id=uuid4(),
         application="checkout-service",
@@ -362,8 +362,8 @@ def create_database_with_spike(database):
         first_seen_at=DETECT_START,
         last_seen_at=DETECT_START,
     )
-    events_per_hour = [3] * 180
-    events_per_hour[SPIKE_HOUR] = 30
+    events_per_hour = [3] * hours
+    events_per_hour[spike_hour] = 30
     events = [
         Event(
             id=uuid4(),
@@ -408,6 +408,28 @@ def test_detect_command_stores_the_spike_and_reports_counts(tmp_path):
     ]
 
 
+def test_detect_command_runs_the_isolation_detector_after_its_training_window(tmp_path):
+    database = tmp_path / "insights.duckdb"
+    create_database_with_spike(database, hours=24 * 24, spike_hour=24 * 24 - 6)
+
+    result = runner.invoke(
+        app,
+        ["detect", "--detector", "isolation", "--threshold", "0.1", "--database", str(database)],
+    )
+
+    assert result.exit_code == 0
+    assert "Stored 1 isolation anomalies at threshold 0.1 from 1 series of 576 hours" in (
+        result.stdout
+    )
+    assert stored_anomaly_hours(database) == [
+        (
+            "isolation",
+            ["checkout-service", "production"],
+            DETECT_START + timedelta(hours=24 * 24 - 6),
+        )
+    ]
+
+
 def test_detect_command_twice_replaces_the_earlier_anomalies(tmp_path):
     database = tmp_path / "insights.duckdb"
     create_database_with_spike(database)
@@ -447,7 +469,7 @@ def test_detect_command_refuses_an_unknown_detector(tmp_path):
     )
 
     assert result.exit_code == 1
-    assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
+    assert "unknown detector 'magic'; choose one of: zscore, seasonal, isolation" in result.output
 
 
 def test_evaluate_command_prints_one_line_per_seed_and_the_summary_table():
@@ -523,6 +545,50 @@ def test_evaluate_command_names_the_series_plot_after_the_detector(tmp_path):
     assert (tmp_path / "series-alerts-seasonal.png").exists()
 
 
+def test_evaluate_command_accepts_the_isolation_detector():
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--seeds",
+            "1",
+            "--detector",
+            "isolation",
+            "--days",
+            "17",
+            "--threshold",
+            "0.2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "in 72 monitored hours" in result.stdout
+    assert "| isolation | 0.2 | " in result.stdout
+
+
+def test_evaluate_command_names_the_isolation_series_plot(tmp_path):
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--seeds",
+            "1",
+            "--detector",
+            "isolation",
+            "--days",
+            "17",
+            "--threshold",
+            "0.2",
+            "--plots",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (tmp_path / "series-alerts-isolation.png").stat().st_size > 0
+    assert (tmp_path / "precision-recall.png").stat().st_size > 0
+
+
 def test_busiest_series_is_the_one_with_most_incidents():
     series_list, truth = cli.simulate_series(2, 8, datetime(2026, 10, 20, tzinfo=UTC))
 
@@ -542,7 +608,7 @@ def test_sweep_rows_gives_one_row_per_threshold():
 
     rows = cli.sweep_rows("zscore", simulations)
 
-    assert [row.threshold for row in rows] == list(cli.SWEEP_THRESHOLDS)
+    assert [row.threshold for row in rows] == list(cli.SWEEP_THRESHOLDS["zscore"])
     assert all(row.detector == "zscore" for row in rows)
 
 
@@ -576,7 +642,7 @@ def test_evaluate_command_refuses_an_unknown_detector():
     result = runner.invoke(app, ["evaluate", "--detector", "magic"])
 
     assert result.exit_code == 1
-    assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
+    assert "unknown detector 'magic'; choose one of: zscore, seasonal, isolation" in result.output
 
 
 def test_tune_command_prints_the_mean_sweep_and_the_best_threshold():
@@ -614,11 +680,27 @@ def test_tune_command_accepts_the_seasonal_detector():
     assert "Best mean F1 for seasonal on seeds 1: threshold 2 (F1 0.00)" in result.stdout
 
 
+def test_tune_command_sweeps_the_score_scale_of_the_isolation_detector():
+    result = runner.invoke(app, ["tune", "--seeds", "1", "--detector", "isolation", "--days", "17"])
+
+    assert result.exit_code == 0
+    assert "| isolation | 0.3 | " in result.stdout
+    assert "| isolation | 2 | " not in result.stdout
+    assert "Best mean F1 for isolation on seeds 1: threshold " in result.stdout
+
+
+def test_every_detector_has_a_sweep_and_a_chosen_threshold():
+    assert set(cli.SWEEP_THRESHOLDS) == set(cli.DETECTORS)
+    assert set(cli.CHOSEN_THRESHOLDS) == set(cli.DETECTORS)
+    for name, chosen in cli.CHOSEN_THRESHOLDS.items():
+        assert chosen in cli.SWEEP_THRESHOLDS[name]
+
+
 def test_tune_command_refuses_an_unknown_detector():
     result = runner.invoke(app, ["tune", "--detector", "magic"])
 
     assert result.exit_code == 1
-    assert "unknown detector 'magic'; choose one of: zscore, seasonal" in result.output
+    assert "unknown detector 'magic'; choose one of: zscore, seasonal, isolation" in result.output
 
 
 def test_simulate_series_gives_one_series_per_application_and_environment():
