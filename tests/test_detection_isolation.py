@@ -196,3 +196,13 @@ def test_find_anomalies_reports_the_flagged_spike_hour():
     assert spike.count == 120
     assert spike.score >= 0.2
     assert spike.expected < 20
+
+
+def test_score_stops_growing_once_a_spike_is_outside_the_training_range():
+    detector = IsolationForestDetector(START)
+    moderate = daily_cycle_counts()
+    extreme = daily_cycle_counts()
+    moderate[SPIKE_HOUR] = 120
+    extreme[SPIKE_HOUR] = 400
+
+    assert detector.score(moderate)[SPIKE_HOUR] == detector.score(extreme)[SPIKE_HOUR]
