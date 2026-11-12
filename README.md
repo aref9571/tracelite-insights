@@ -150,8 +150,8 @@ insights detect --detector zscore --threshold 4
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--detector` | `zscore` | Detector to run: `zscore` or `seasonal` |
-| `--threshold` | `4` | Score at or above which an hour is flagged |
+| `--detector` | `zscore` | Detector to run: `zscore`, `seasonal` or `isolation` |
+| `--threshold` | `4` | Score at or above which an hour is flagged; the `isolation` scores are about 0 to 0.26, so use a value such as `0.225` there |
 | `--database` | `INSIGHTS_DATABASE_PATH` | DuckDB database file; it must already exist |
 
 Each run replaces the earlier anomalies of the same detector. Rows of other detectors are kept.
@@ -159,6 +159,8 @@ Each run replaces the earlier anomalies of the same detector. Rows of other dete
 The `zscore` detector compares each hour with the 168 hours (one week) before it. The score is `(count - mean) / max(std, 1)`, where the mean and standard deviation come from those previous hours only, so a spike does not raise its own baseline. The floor of 1 keeps quiet series with an almost constant count from producing huge scores. An hour is flagged only if its score reaches the threshold and it has at least 3 errors. The first 168 hours of a series have no score.
 
 The `seasonal` detector compares each hour with the same hour of the week in the 3 weeks before it, together with the hour before and the hour after in each of those weeks (9 values). The expected count is the median of these values and the spread is their median absolute deviation (MAD) × 1.4826, but at least `sqrt(expected)` and at least 1. The score is `(count - expected) / spread`. Median and MAD are hardly moved by one unusual value in an earlier week, and comparing Monday 14:00 with earlier Mondays at 14:00 follows the daily and weekly pattern. The first 3 weeks and 1 hour of a series have no score.
+
+The `isolation` detector is an isolation forest from scikit-learn. For every hour it builds six features: the count, the count minus the median of the same hour of the day and day type in the training window, the ratio to the mean of the previous 24 hours, the hour of the day as sine and cosine, and a weekend flag. It fits 100 trees with a fixed random state on the first 14 days of each series and scores the later hours with `-decision_function`, so a higher score means a more unusual hour. The first 14 days have no score. An hour is flagged only if its score reaches the threshold and its count is above the expected count.
 
 ## Evaluating detectors
 
@@ -171,17 +173,17 @@ insights evaluate --seeds 2,3,4,5 --detector zscore --threshold 4
 | Option | Default | Meaning |
 |---|---|---|
 | `--seeds` | `2,3,4,5` | Comma-separated simulation seeds |
-| `--detector` | `zscore` | Detector to evaluate: `zscore` or `seasonal` |
-| `--threshold` | `4` | Score at or above which an hour is flagged |
+| `--detector` | `zscore` | Detector to evaluate: `zscore`, `seasonal` or `isolation` |
+| `--threshold` | `4` | Score at or above which an hour is flagged; the `isolation` scores are about 0 to 0.26, so use a value such as `0.225` there |
 | `--days` | `28` | Length of each simulated period, at least 4 days |
 | `--end` | `2026-10-20T00:00:00` | End of each simulated period in UTC; fixed so that the results can be reproduced |
 | `--plots` | none | Folder for the PNG plots; without it no plot is drawn |
 
 It prints one line per seed and a Markdown table with the mean ± standard deviation over the seeds of precision, recall and F1 per hour, incident recall, false alerts per week and median detection delay. [docs/evaluation.md](docs/evaluation.md) defines the metrics and records the results.
 
-With `--plots docs/img`, `insights evaluate` also writes two PNG files: `series-alerts-<detector>.png` shows the hourly errors of the series with the most incidents of the first seed, with the incident windows shaded and the flagged hours marked, and `precision-recall.png` shows the precision and recall of every threshold from 2 to 8 for both detectors, with the chosen thresholds circled.
+With `--plots docs/img`, `insights evaluate` also writes two PNG files: `series-alerts-<detector>.png` shows the hourly errors of the series with the most incidents of the first seed, with the incident windows shaded and the flagged hours marked, and `precision-recall.png` shows the precision and recall of every threshold of the three detectors, with the chosen thresholds circled.
 
-`insights tune` chooses a threshold on seeds that are not used for reporting. It simulates each seed, evaluates the detector at the thresholds 2, 2.5, ..., 8, prints a table with the mean ± standard deviation over the seeds for each threshold and names the threshold with the best mean hour-level F1:
+`insights tune` chooses a threshold on seeds that are not used for reporting. It simulates each seed, evaluates the detector at the thresholds 2, 2.5, ..., 8 (0, 0.025, ..., 0.3 for `isolation`), prints a table with the mean ± standard deviation over the seeds for each threshold and names the threshold with the best mean hour-level F1:
 
 ```bash
 insights tune --seeds 1,6,7,8,9 --detector seasonal --days 56

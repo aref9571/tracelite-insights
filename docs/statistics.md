@@ -86,9 +86,9 @@ $$\text{precision} = \frac{TP}{TP + FP} \qquad \text{recall} = \frac{TP}{TP + FN
 
 Precision answers "when the detector raises an alert, how often is it right?", recall answers "how much of the incident does it find?". $F_1$ is the harmonic mean, which is low when either of the two is low. A low threshold flags many hours: recall goes up, precision goes down. A high threshold flags few hours: precision goes up, recall goes down.
 
-![Precision and recall for thresholds 2 to 8](img/precision-recall.png)
+![Precision and recall over the threshold sweeps of the three detectors](img/precision-recall.png)
 
-Each point of a curve is one threshold from 2 to 8 in steps of 0.5, and the circled points are the chosen threshold of 4.5 for both detectors. Reading the plot:
+Each point of a curve is one threshold. The z-score and seasonal detectors use 2 to 8 in steps of 0.5, the isolation forest 0 to 0.3 in steps of 0.025 because its score is on another scale. The circled points are the chosen thresholds: 4.5 for the two statistical detectors and 0.225 for the isolation forest. Reading the plot:
 
 - Moving from the circle to the lower right (lower thresholds) buys recall at the price of precision. At threshold 2 the z-score detector flags 55% of the incident hours, but only 6% of its flagged hours are inside an incident, which is about 38 false alerts per week on the report seeds.
 - Moving to the upper left (higher thresholds) gives a few alerts that are mostly right, but they cover only a small part of the incidents. The curve is ragged there because only a handful of hours are flagged, so one hour changes the precision a lot.
