@@ -17,6 +17,7 @@ dependencies = [
     "numpy>=2.5",
     "pytz>=2026.5",
     "matplotlib>=3.11",
+    "scikit-learn>=1.9",
 ]
 
 [project.optional-dependencies]

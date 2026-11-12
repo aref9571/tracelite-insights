@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +10,7 @@ import typer
 from insights import __version__
 from insights.config import Settings, get_settings
 from insights.detection.base import Detector, find_anomalies
+from insights.detection.isolation import IsolationForestDetector
 from insights.detection.seasonal import SeasonalRobust
 from insights.detection.zscore import RollingZScore
 from insights.evaluation.dispersion import dispersion
@@ -47,10 +49,19 @@ from insights.tracelite_client import TraceLiteClient, TraceLiteConnectionError,
 
 app = typer.Typer(no_args_is_help=True)
 
-DETECTORS: dict[str, type[Detector]] = {"zscore": RollingZScore, "seasonal": SeasonalRobust}
+DETECTORS: dict[str, Callable[[datetime], Detector]] = {
+    "zscore": lambda start: RollingZScore(),
+    "seasonal": lambda start: SeasonalRobust(),
+    "isolation": IsolationForestDetector,
+}
 EVALUATION_END = datetime(2026, 10, 20)
-SWEEP_THRESHOLDS = tuple(2.0 + 0.5 * step for step in range(13))
-CHOSEN_THRESHOLDS = {"zscore": 4.5, "seasonal": 4.5}
+SCORE_SWEEP = tuple(2.0 + 0.5 * step for step in range(13))
+SWEEP_THRESHOLDS = {
+    "zscore": SCORE_SWEEP,
+    "seasonal": SCORE_SWEEP,
+    "isolation": tuple(0.025 * step for step in range(13)),
+}
+CHOSEN_THRESHOLDS = {"zscore": 4.5, "seasonal": 4.5, "isolation": 0.2}
 
 
 @app.callback()
@@ -176,7 +187,7 @@ def detect_command(
             return
         start, end = period
         series_list = hourly_counts(store, start, end)
-        anomalies = find_anomalies(DETECTORS[detector](), series_list, threshold)
+        anomalies = find_anomalies(DETECTORS[detector](start), series_list, threshold)
         written = store.replace_anomalies(detector, anomalies)
     hours = (end - start) // timedelta(hours=1)
     typer.echo(
@@ -216,7 +227,9 @@ def evaluate_command(
     simulations = [simulate_series(seed, days, end_hour) for seed in seed_list]
     evaluations = []
     for seed, (series_list, truth) in zip(seed_list, simulations, strict=True):
-        evaluation = evaluate_detector(DETECTORS[detector](), series_list, truth, threshold)
+        evaluation = evaluate_detector(
+            DETECTORS[detector](truth.start), series_list, truth, threshold
+        )
         typer.echo(seed_summary(seed, evaluation))
         evaluations.append(evaluation)
     typer.echo("")
@@ -323,9 +336,11 @@ def parse_seeds(text: str) -> list[int]:
 def sweep_rows(
     detector: str, simulations: list[tuple[list[Series], GroundTruth]]
 ) -> list[ReportRow]:
-    evaluations = {threshold: [] for threshold in SWEEP_THRESHOLDS}
+    thresholds = SWEEP_THRESHOLDS[detector]
+    evaluations = {threshold: [] for threshold in thresholds}
     for series_list, truth in simulations:
-        for point in threshold_sweep(DETECTORS[detector](), series_list, truth, SWEEP_THRESHOLDS):
+        sweep = threshold_sweep(DETECTORS[detector](truth.start), series_list, truth, thresholds)
+        for point in sweep:
             evaluations[point.threshold].append(point.evaluation)
     return [report_row(detector, threshold, evaluations[threshold]) for threshold in evaluations]
 
@@ -338,7 +353,7 @@ def write_plots(
 ) -> None:
     series_list, truth = simulations[0]
     series = busiest_series(series_list, truth)
-    alerts = DETECTORS[detector]().alerts(series.counts, threshold)
+    alerts = DETECTORS[detector](truth.start).alerts(series.counts, threshold)
     series_path = folder / f"series-alerts-{detector}.png"
     plot_series_with_alerts(series, alerts, truth.incidents, series_path)
     sweeps = {name: sweep_rows(name, simulations) for name in DETECTORS}

@@ -79,7 +79,7 @@ def plot_precision_recall(
     axes.set_ylim(0.0, 1.0)
     axes.set_xlabel("Recall (share of incident hours flagged)")
     axes.set_ylabel("Precision (share of flagged hours inside an incident)")
-    axes.set_title("Precision and recall for thresholds 2 to 8")
+    axes.set_title("Precision and recall over each detector's threshold sweep")
     axes.grid(alpha=0.3)
     axes.legend(loc="upper right")
     save(figure, path)
