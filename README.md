@@ -13,7 +13,7 @@ In development.
 | DuckDB store and offline import of simulated data | Done |
 | Import of issues and events from a running TraceLite | Done |
 | Spike detection | In progress |
-| Related-issue analysis | Planned |
+| Related-issue analysis | In progress |
 | Evaluation against simulated incidents | In progress |
 | REST API and dashboard | Planned |
 
